@@ -82,7 +82,49 @@ Every pipeline run logs the manifest of each dataset it reads to MLflow.
 
 ## GraphSnapshot
 
-TBD (infrastructure step 2).
+The only object graph builders emit and the only graph input downstream stages consume.
+One snapshot per bar-axis timestamp `t`. Arrays are numpy; the Dataset converts to torch
+without casting.
+
+**Rule: everything in a snapshot is known at `t`.** Labels (forward returns) are not part
+of it — a shared `labels(timestamp, node_ids)` function supplies them to training and eval.
+
+### Fields
+
+| Field | dtype, shape | Notes |
+| :-- | :-- | :-- |
+| `timestamp` | tz-aware datetime | bar end, `America/New_York` |
+| `node_ids` | `str [N]` | unique; tickers for equities, names for context nodes |
+| `node_type` | `int64 [N]` | index into `node_type_names` |
+| `node_type_names` | `tuple[str, ...]` | e.g. `("equity", "commodity")` |
+| `target_mask` | `bool [N]` | nodes that are scored and ranked |
+| `x` | `float32 [N, F]` | node features, column blocks per type (below) |
+| `feature_names` | `str [F]` | unique |
+| `feature_owner` | `int64 [F]` | node type that owns each column |
+| `edge_index` | `int64 [2, E]` | row 0 source, row 1 destination; messages flow source → destination |
+| `edge_weight` | `float32 [E]` | 1.0 for unweighted edges |
+| `edge_type` | `int64 [E]` | index into `edge_type_names` |
+| `edge_type_names` | `tuple[str, ...]` | e.g. `("supplies", "exposes")` |
+| `edge_attr` | `float32 [E, D]` | named edge columns; `D` may be 0 |
+| `edge_attr_names` | `str [D]` | unique |
+
+### Invariants (checked on construction)
+
+- Nodes are exactly those that exist at `t` and pass the FeatureEngine's history
+  requirement, sorted by `(node_type, node_id)`. Row positions are not stable across
+  snapshots; track nodes across time by `node_id`.
+- **Column blocks:** `x[i, j] == 0` wherever `feature_owner[j] != node_type[i]`.
+- `x`, `edge_weight`, `edge_attr` are finite; `edge_weight >= 0`.
+- `edge_index` values are in `[0, N)`; no self-loops (models add their own).
+- Undirected relations are stored in both directions with equal weight and attributes.
+- A snapshot round-trips through a file losslessly.
+
+### What reaches the model
+
+`x` and `edge_attr` hold everything a builder computes, including columns meant only for
+analysis (e.g. `beta_sign`, `hops_to_commodity`). The Dataset passes only the columns
+listed in config (`model_features`, `model_edge_attrs`); `model_edge_attrs` defaults to
+empty, so edge attributes reach the model only when listed explicitly.
 
 ## Open questions
 

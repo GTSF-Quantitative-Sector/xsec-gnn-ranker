@@ -2,3 +2,5 @@
 config/machine.yaml
 *.egg-info/
 /data/
+__pycache__/
+.pytest_cache/

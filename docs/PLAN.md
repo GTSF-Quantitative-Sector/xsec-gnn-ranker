@@ -12,8 +12,13 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
   1m and 65m bars have been built. `data.universes` is a list built in one command;
   `benchmarks` (SPY, RSP) is its own universe.
 
+- **Step 2, GraphSnapshot:** schema in `docs/CONTRACTS.md`, implemented in
+  `src/gnns/data/snapshot.py` (validated on construction, lossless `.npz` round-trip,
+  `add_reverse_edges` helper). FeatureEngine missing-value policy in
+  `src/gnns/data/CLAUDE.md`.
+
 ## Next
 
-- Finalize the data contract (mark CONTRACTS.md data sections locked).
-- Step 2: GraphSnapshot schema.
+- Finalize the data contract after 1m and 65m bars have been built.
+- Step 3: GraphBuilder base class + SectorETFCorrelationBuilder.
 - Universe open questions (CONTRACTS.md): ticker identity, survivorship, unadjusted close.
