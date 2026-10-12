@@ -7,6 +7,9 @@ name = "gnns"
 version = "0.0.1"
 requires-python = ">=3.12"
 
+[project.scripts]
+gnns = "gnns.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

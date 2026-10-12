@@ -12,6 +12,8 @@ factor model, evaluated on rank IC, decile cascade, and a long-only top-k backte
 - Users change config, not code. Behavior that's meant to be tunable goes into `config/config.yaml`.
 - Dependencies are added to `environment.yml` only when code first imports them.
 - Every pipeline run logs its resolved config and the git SHA to MLflow.
+- Every user-facing command or setup step is documented in `README.md` in the same change
+  that adds it.
 
 ## Tooling
 

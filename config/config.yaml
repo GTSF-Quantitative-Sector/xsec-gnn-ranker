@@ -1,0 +1,7 @@
+data:
+  universes:              # each → config/universes/<name>.txt
+    - sector_etfs
+    - benchmarks
+  bar: 1d                 # shared by every universe above
+  start: 2010-01-01
+  end: 2026-06-30         # inclusive

@@ -4,6 +4,10 @@ channels:
 dependencies:
   - python=3.12
   - pip
+  - polars
+  - python-dotenv
+  - pyyaml
+  - requests
   - pytest
   - ruff
   - pyright

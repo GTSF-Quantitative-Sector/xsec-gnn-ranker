@@ -1,3 +1,4 @@
 .env
 config/machine.yaml
 *.egg-info/
+/data/

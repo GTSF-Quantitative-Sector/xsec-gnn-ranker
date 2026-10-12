@@ -19,7 +19,7 @@ We will then divide the top 3 (based on team member interest/vote) GNN construct
 ## Methods:
 
 - **Data:**
-  We will use Massive API as the data source and each team member will store their relevant data in csv files on their local device that are gitignore'd. As for the time increments, daily data from [01-2010, 07-2026) will most likely yield the most reliable results for the IC's long-only equities trading horizon (that is normally of the order of weeks to months), and we can further experiment later in the semester with tighter time chunks (on the order of hourly or even minutely) depending on the context/ideas for the graph construction.
+  We will use Massive API as the data source and each team member will store their relevant data in parquet files on their local device that are gitignore'd (layout in docs/CONTRACTS.md). As for the time increments, daily data from [01-2010, 07-2026) will most likely yield the most reliable results for the IC's long-only equities trading horizon (that is normally of the order of weeks to months), and we can further experiment later in the semester with tighter time chunks (on the order of hourly or even minutely) depending on the context/ideas for the graph construction.
 - **Model Architecture:**
   We will primarily rely on a GAT/GATv2 model since it computes attention coefficients for each edge, while using GraphSAGE as a graph-based baseline and various non-graph baselines (can include XGBoost, simple regression, etc.). While GAT/GATv2 will be the core model used on each of the ideas below, we will choose to further experiment on some ideas with models like a THGNN or an R-GCN to see if they outperform the standard GAT model in the particular context of the idea.
 - **Target & Loss Function:**
