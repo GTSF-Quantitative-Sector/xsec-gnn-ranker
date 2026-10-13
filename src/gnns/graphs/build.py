@@ -18,17 +18,17 @@ def build_snapshots(cfg: dict) -> list[GraphSnapshot]:
         raise ValueError(f"unknown builder {graph['builder']!r}; valid: {sorted(BUILDERS)}")
 
     prices = store.load(ROOT / cfg["data_root"], graph["universe"], cfg["data"]["bar"]).collect()
-    feats = features.compute(prices, cfg["features"])
+    feats = features.compute(prices, graph["features"])
     axis = prices["timestamp"].unique().sort()
     builder = BUILDERS[graph["builder"]](
         {"prices": prices, "features": feats}, axis, **graph.get("params", {})
     )
     # A node's own history must cover the builder's price window, or newly eligible nodes
     # get edges from partial windows.
-    min_history, need = cfg["features"]["min_history_bars"], builder.lookbacks().get("prices")
+    min_history, need = graph["features"]["min_history_bars"], builder.lookbacks().get("prices")
     if need is not None and min_history < need - 1:
         raise ValueError(
-            f"features.min_history_bars={min_history} is shorter than {graph['builder']}'s "
+            f"graph features.min_history_bars={min_history} is shorter than {graph['builder']}'s "
             f"price window ({need - 1} returns); newly eligible nodes would get partial windows"
         )
 

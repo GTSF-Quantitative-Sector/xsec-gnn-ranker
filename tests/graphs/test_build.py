@@ -22,15 +22,15 @@ def _cfg(tmp_path, window_bars: int = 5, min_history_bars: int = 5) -> dict:
     return {
         "data_root": str(tmp_path),
         "data": {"bar": "1d"},
-        "features": {
-            "min_history_bars": min_history_bars,
-            "list": [{"name": "momentum", "bars": 5}],
-        },
         "graph": {
             "name": "test",
             "builder": "sector_etf_correlation",
             "universe": "etfs",
             "params": {"window_bars": window_bars},
+            "features": {
+                "min_history_bars": min_history_bars,
+                "list": [{"name": "momentum", "bars": 5}],
+            },
         },
         "snapshot_every_bars": 5,
     }

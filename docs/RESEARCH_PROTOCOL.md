@@ -50,6 +50,20 @@ These settings never switch between folds.
 Changing `train_bars`/`val_bars`/`test_bars` (e.g. 5-year training) checks whether a
 conclusion is robust; it is not a way to pick the best-looking result.
 
+## Baselines
+
+Constructions share no node features: each chooses its own in its graph file, and some
+may not use prices at all. What they share is the target (`forward_returns` over
+`horizon_bars`), `snapshot_every_bars`, the folds and held-out period, and the Evaluator.
+
+- **Matched baseline (required per construction):** the same node features and settings,
+  with no graph (e.g. XGBoost or an MLP per node, or the same GNN with edges removed),
+  configured in that construction's graph file. Construction minus matched baseline is
+  the **graph lift**: the evidence that relationships carry signal.
+- Cross-construction comparisons use graph lift, plus absolute results.
+- **Price-only reference (optional):** a construction config using only price features
+  (e.g. momentum, volatility), as a simple anchor for presenting results.
+
 ## Hyperparameter selection
 
 Grid-searched settings are chosen once, from the search folds' average validation IC, and

@@ -20,10 +20,21 @@ loop. This layer reads machine settings.
 
 ## Dataset decisions
 
-- Passes the model only the configured `model_features` / `model_edge_attrs` columns.
+- `dataset.build_dataset(snapshots, labels, start, end, cfg) -> list[Data]` for one
+  period (e.g. a fold's train range). One sample = one snapshot (a whole cross-section at
+  one `t`), as a PyG `Data` with `x`, `edge_index`, `edge_weight`, `edge_attr`, `y`,
+  `label_mask`, plus `node_ids` and `timestamp`. `label_mask` = ranked (`target_mask`) and
+  has a label. Batch with `torch_geometric.loader.DataLoader`; graphs stay disjoint.
+- Model node columns = the construction's `features.list` columns plus builder-added
+  columns listed in its graph file's `extra_model_features` (default `[]`); edge columns
+  only those in `model_edge_attrs` (default `[]`).
+- `y` is the raw forward return (`gnns.data.labels`); losses that need ranks rank inside
+  the loss.
+- Nodes without a label stay in the graph (they still pass messages) and are excluded
+  from the loss and IC via `label_mask`: whether a label exists depends on bars after `t`.
 - Normalizes those features cross-sectionally at each `t`, per node type, using one
-  shared function (so analysis can reproduce what the model saw). Config
-  `normalize: rank | zscore | none`, default `rank` (percentile scaled to [-1, 1], ties
+  shared function (`dataset.normalize`, so analysis can reproduce what the model saw).
+  Config `normalize: rank | zscore | none` in `config/config.yaml`, set to `rank` (percentile scaled to [-1, 1], ties
   averaged, a lone node gets 0); `zscore` is clipped at ±3.
 - Single-node types can't be normalized cross-sectionally; they'll need per-fold
   time-series scaling once the supply-chain and macro builders exist.

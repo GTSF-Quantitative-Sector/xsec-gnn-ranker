@@ -14,11 +14,14 @@ correlation builder that exercises the pipeline end to end.
   with its own look-ahead test, and is then passed in like prices and features.
 - Which timestamps are built (rebalance cadence) is the run's choice, not the builder's:
   `snapshot_every_bars` in `config/config.yaml`, shared by every construction.
-- Each construction has `config/graphs/<name>.yaml` (builder, universe, `params`,
-  `sources`). Config holds values; builder code declares structure (inputs, lookbacks).
+- Each construction has `config/graphs/<name>.yaml` (builder, universe, `params`, its own
+  node `features`, `sources`). Constructions share no features; config holds values,
+  builder code declares structure (inputs, lookbacks). Shared across constructions:
+  labels, `snapshot_every_bars`, `horizon_bars`, walk-forward and held-out settings.
 - New builders are registered in `BUILDERS` in `build.py`; `params` become keyword
   arguments of the builder's `__init__`.
-- `build_snapshots` checks `features.min_history_bars` covers the builder's price window.
+- `build_snapshots` checks the graph's `features.min_history_bars` covers the builder's
+  price window.
 - Use `stats.pairwise_corr` (vectorized, gap-aware) rather than per-pair loops.
 - The sector-ETF builder is fully connected. Real builders on large universes must
   sparsify (graphical lasso, top-k): 1,500 fully connected nodes is ~2.25M edges/snapshot.

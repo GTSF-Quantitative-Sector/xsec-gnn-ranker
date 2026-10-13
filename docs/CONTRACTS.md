@@ -158,9 +158,11 @@ of it — `gnns.data.labels.forward_returns` supplies them to training and eval.
 ### What reaches the model
 
 `x` and `edge_attr` hold everything a builder computes, including columns meant only for
-analysis (e.g. `beta_sign`, `hops_to_commodity`). The Dataset passes only the columns
-listed in config (`model_features`, `model_edge_attrs`); `model_edge_attrs` defaults to
-empty, so edge attributes reach the model only when listed explicitly.
+analysis (e.g. `beta_sign`, `hops_to_commodity`). The Dataset passes the model the
+construction's `features` (its graph file's `features.list`) plus any builder-added node
+columns listed in `extra_model_features`, and only the edge columns listed in
+`model_edge_attrs`. Both lists default to empty, so analysis-only columns reach the model
+only when listed explicitly.
 
 ## Open questions
 

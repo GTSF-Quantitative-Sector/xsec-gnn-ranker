@@ -69,23 +69,23 @@ polars `LazyFrame`.
 
 Needs the construction's universe built first (`gnns build-data`).
 
-1. Pick a construction in `config/config.yaml` with `graph: <name>`. Its settings live in
-   `config/graphs/<name>.yaml` (builder, universe, `params`, and later `sources`):
+1. Pick a construction in `config/config.yaml` with `graph: <name>`. Everything specific to
+   it lives in `config/graphs/<name>.yaml`: builder, universe, `params`, its own node
+   `features`, and later `sources`:
 
        builder: sector_etf_correlation
        universe: sector_etfs
        params:
          window_bars: 60
-
-2. Set the shared settings in `config/config.yaml`:
-
-       snapshot_every_bars: 5      # one snapshot every 5 bars (≈ weekly on daily data)
        features:
          min_history_bars: 60      # a node needs this many bars before it is used
          list:
            - {name: momentum, bars: 20}
            - {name: momentum, bars: 60}
            - {name: volatility, bars: 20}
+
+2. Settings shared by every construction stay in `config/config.yaml`, e.g.
+   `snapshot_every_bars: 5` (one snapshot every 5 bars, ≈ weekly on daily data).
 
 3. Run `gnns build-graphs`. It builds every snapshot in memory and prints a summary
    (count, date range, node and edge counts); nothing is written to disk.

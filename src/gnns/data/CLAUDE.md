@@ -10,16 +10,19 @@ and features (computed at `t` from bars `<= t`) already comply.
 
 ## FeatureEngine decisions
 
-- Computes the shared equity features for the whole price history at once, returning one
-  long table `(timestamp, ticker, <feature columns>)`; builders filter it to their `t`.
+- Computes equity node features for the whole price history at once, returning one long
+  table `(timestamp, ticker, <feature columns>)`; builders filter it to their `t`.
   Features of construction-specific node types (commodities, macro, events) belong to
   the builder, not here.
-- Features are a config list of `{name, <params>}` entries; `name` maps to a function in
-  a plain dict registry, and columns are named from the entry (e.g. `momentum_20`).
+- There is no shared feature set: each construction chooses its own in
+  `config/graphs/<name>.yaml` under `features:` (`min_history_bars` + `list`). The feature
+  functions are shared: a plain dict registry maps each `name` to one function, so a
+  feature is computed identically wherever it is used. Columns are named from the entry
+  (e.g. `momentum_20`).
 - Windows count positions on the bar axis: each ticker is spread onto the full axis
   first, with missing bars as nulls.
 - A ticker is eligible at `t` once it has at least `min_history_bars` bar-axis positions
-  before `t` (config; must be at least the longest feature window).
+  before `t` (per construction; must be at least the longest feature window).
 - After that, a missing value is filled with that feature's cross-sectional median at
   `t`, and fill counts are logged. Add per-feature "was filled" indicator columns only if
   the logged counts turn out large.

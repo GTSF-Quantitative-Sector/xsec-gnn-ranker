@@ -6,16 +6,10 @@ data:
   start: 2010-01-01
   end: 2026-06-30         # inclusive
 
-features:
-  min_history_bars: 60    # bar-axis positions before t; >= longest window below
-  list:
-    - {name: momentum, bars: 20}
-    - {name: momentum, bars: 60}
-    - {name: volatility, bars: 20}
-
 graph: sector_etf_corr      # → config/graphs/sector_etf_corr.yaml
 snapshot_every_bars: 5      # shared by every construction; 5 daily bars ≈ weekly
 horizon_bars: 5             # label: enter at next bar's open, exit h bars later
+normalize: rank             # rank | zscore | none; model features, across nodes at each t
 
 walk_forward:
   window: rolling           # rolling | expanding

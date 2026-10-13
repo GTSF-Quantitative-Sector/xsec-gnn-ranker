@@ -18,7 +18,7 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
   `src/gnns/data/CLAUDE.md`.
 
 - **Step 4, FeatureEngine (minimal, built before step 3):** `src/gnns/data/features.py`,
-  config `features:`. Momentum and volatility on the dense bar axis, `min_history_bars`
+  features chosen per construction under `features:` in its graph file (no shared set). Momentum and volatility on the dense bar axis, `min_history_bars`
   eligibility, cross-sectional median fill, tested for look-ahead.
 
 - **Point-in-time input rule** adopted for all builder inputs (`docs/CONTRACTS.md`);
@@ -45,10 +45,18 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
   from strategy-defining (horizon, cadence) and experiment-design settings; records the
   fixed-recipe hyperparameter selection and the held-out period.
 
+- **Env versions pinned:** direct dependencies in `environment.yml` pinned to exact
+  versions (no lock file; conda still picks CUDA vs CPU torch per machine). Switch to
+  `conda-lock` if indirect-package drift ever causes discrepancies.
+
+- **Step 6, GraphSnapshotDataset:** `src/gnns/train/dataset.py`. One PyG `Data` per
+  snapshot in a period: model columns selected, rank-normalized per node type, labels
+  joined, unlabeled nodes kept and masked. Sector ETFs fold 1: 151 train / 26 val / 50 test
+  samples; batched GATv2 forward runs on GPU.
+
 ## Next
 
 - Finalize the data contract after 1m and 65m bars have been built.
-- Step 6: GraphSnapshotDataset. torch 2.14.1 + PyG 2.8 (conda-forge, CUDA 13.4) installed
-  and verified on CPU and GPU (GATv2, 1,500 nodes / 40k edges: 110 ms CPU, 5.7 ms GPU).
-- Env lock file (planned for when torch/PyG landed).
+- Step 7: ModelFactory + LossFactory registries (GATv2, GraphSAGE; ListMLE) and the
+  Trainer (early stopping on validation).
 - Universe open questions (CONTRACTS.md): ticker identity, survivorship, unadjusted close.

@@ -25,6 +25,11 @@ def volatility(bars: int) -> pl.Expr:
 FEATURES: dict[str, Callable[..., pl.Expr]] = {"momentum": momentum, "volatility": volatility}
 
 
+def column_names(specs: list[dict]) -> list[str]:
+    """Output column of each feature entry, e.g. {name: momentum, bars: 20} -> momentum_20."""
+    return ["_".join([s["name"], *(str(v) for k, v in s.items() if k != "name")]) for s in specs]
+
+
 def compute(prices: pl.DataFrame, cfg: dict) -> pl.DataFrame:
     """One row per eligible (timestamp, ticker), one column per configured feature."""
     specs, min_history = cfg["list"], cfg["min_history_bars"]
@@ -33,9 +38,7 @@ def compute(prices: pl.DataFrame, cfg: dict) -> pl.DataFrame:
     if min_history < (longest := max(s["bars"] for s in specs)):
         raise ValueError(f"min_history_bars={min_history} < longest feature window {longest}")
     params = [{k: v for k, v in s.items() if k != "name"} for s in specs]
-    names = [
-        "_".join([s["name"], *map(str, p.values())]) for s, p in zip(specs, params, strict=True)
-    ]
+    names = column_names(specs)
 
     # Dense bar axis per ticker, from its first bar to its last.
     axis = prices.select(pl.col("timestamp").unique())
