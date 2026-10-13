@@ -1,0 +1,22 @@
+{
+  "sequence_length": 20,
+  "hidden_dim": 16,
+  "heads": 2,
+  "epochs": 30,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "weight_decay": 0.001,
+  "seeds": [7, 19, 43],
+  "bootstrap_block": 10,
+  "bootstrap_repeats": 1000,
+  "folds": [
+    {"name": "2025Q3", "train_end": "2025-06-30", "eval_end": "2025-09-30"},
+    {"name": "2025Q4", "train_end": "2025-09-30", "eval_end": "2025-12-31"}
+  ],
+  "models": [
+    "equity_mlp", "macro_mlp", "beta_mlp_magnitude", "beta_mlp_signed",
+    "gat_magnitude", "gat_signed", "gat_constant", "gat_shuffled",
+    "temporal_magnitude", "temporal_signed", "temporal_constant", "temporal_shuffled",
+    "temporal_frozen", "sequence_mlp"
+  ]
+}

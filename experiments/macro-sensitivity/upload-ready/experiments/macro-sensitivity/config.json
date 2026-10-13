@@ -1,0 +1,15 @@
+{
+  "start": "2010-01-01",
+  "end": "2026-09-21",
+  "assets": ["XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLY", "XLRE", "XLC"],
+  "fred": {"rates": "DGS10", "credit": "BAMLH0A0HYM2", "vix": "VIXCLS", "oil": "DCOILBRENTEU"},
+  "gold_proxy": "GLD",
+  "macro_lag_sessions": 5,
+  "beta_window": 252,
+  "beta_min_obs": 200,
+  "beta_ridge": 10.0,
+  "horizon": 5,
+  "train_end": "2025-06-30",
+  "validation_end": "2025-12-31",
+  "model_ridge": 100.0
+}
