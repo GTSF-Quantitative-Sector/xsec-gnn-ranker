@@ -1,9 +1,27 @@
 # gnns.graphs
 
-The GraphBuilder abstract base class and all concrete builders. Every builder's
-`build(date, universe)` must return a GraphSnapshot (see `src/gnns/data/`). First
-implementation is a dummy sector-ETF correlation builder that exercises the pipeline
-end to end.
+The GraphBuilder abstract base class and all concrete builders. Every builder returns a
+GraphSnapshot (`src/gnns/data/snapshot.py`). First implementation is a dummy sector-ETF
+correlation builder that exercises the pipeline end to end.
+
+## Decisions
+
+- Builders implement `build_at(t, inputs)` and declare a lookback (in bars, or `None`) per
+  input. The base class slices every input to its window ending at `t` (rule in
+  `docs/CONTRACTS.md`, "Point-in-time inputs"), so a builder never sees rows after `t`.
+- Builders never load or slice data themselves. A construction-specific source (commodity
+  prices, BEA tables, filings, news) gets a loader that sets the known-at `timestamp`,
+  with its own look-ahead test, and is then passed in like prices and features.
+- Which timestamps are built (rebalance cadence) is the run's choice, not the builder's:
+  `snapshot_every_bars` in `config/config.yaml`, shared by every construction.
+- Each construction has `config/graphs/<name>.yaml` (builder, universe, `params`,
+  `sources`). Config holds values; builder code declares structure (inputs, lookbacks).
+- New builders are registered in `BUILDERS` in `build.py`; `params` become keyword
+  arguments of the builder's `__init__`.
+- `build_snapshots` checks `features.min_history_bars` covers the builder's price window.
+- Use `stats.pairwise_corr` (vectorized, gap-aware) rather than per-pair loops.
+- The sector-ETF builder is fully connected. Real builders on large universes must
+  sparsify (graphical lasso, top-k): 1,500 fully connected nodes is ~2.25M edges/snapshot.
 
 ## Open questions
 

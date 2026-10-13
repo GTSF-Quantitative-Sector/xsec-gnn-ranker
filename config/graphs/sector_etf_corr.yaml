@@ -1,0 +1,4 @@
+builder: sector_etf_correlation
+universe: sector_etfs
+params:
+  window_bars: 60           # returns per correlation; <= features.min_history_bars

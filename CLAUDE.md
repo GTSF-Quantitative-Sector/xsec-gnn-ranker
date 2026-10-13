@@ -49,4 +49,4 @@ Top-level modules (added when needed): `config.py` (loads `config.yaml` + `machi
 | `docs/project_overview.md` | the full research plan |
 | `docs/PLAN.md` | current pipeline status: what's built, what's next |
 | `docs/CONTRACTS.md` | locked interfaces (GraphSnapshot, config schema) |
-| `docs/RESEARCH_PROTOCOL.md` | walk-forward, purge/embargo, MLflow conventions |
+| `docs/RESEARCH_PROTOCOL.md` | walk-forward, purge, MLflow conventions |

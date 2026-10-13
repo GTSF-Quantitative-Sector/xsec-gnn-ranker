@@ -6,6 +6,8 @@ dependencies:
   - pip
   - numpy
   - polars
+  - pytorch                # conda picks the CUDA build when an NVIDIA driver is present
+  - pytorch_geometric
   - python-dotenv
   - pyyaml
   - requests

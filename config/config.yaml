@@ -5,3 +5,21 @@ data:
   bar: 1d                 # shared by every universe above
   start: 2010-01-01
   end: 2026-06-30         # inclusive
+
+features:
+  min_history_bars: 60    # bar-axis positions before t; >= longest window below
+  list:
+    - {name: momentum, bars: 20}
+    - {name: momentum, bars: 60}
+    - {name: volatility, bars: 20}
+
+graph: sector_etf_corr      # → config/graphs/sector_etf_corr.yaml
+snapshot_every_bars: 5      # shared by every construction; 5 daily bars ≈ weekly
+horizon_bars: 5             # label: enter at next bar's open, exit h bars later
+
+walk_forward:
+  window: rolling           # rolling | expanding
+  train_bars: 756           # ≈ 3 years of daily bars
+  val_bars: 126             # ≈ 6 months; early stopping and tuning only
+  test_bars: 252            # ≈ 1 year; also the step between folds
+  holdout_start: 2024-01-01 # shared by every construction; may move later, never earlier

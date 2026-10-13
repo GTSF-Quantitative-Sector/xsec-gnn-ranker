@@ -5,7 +5,7 @@ consumer. Status: **DRAFT** — finalize after the first dry run.
 
 ## Time and units
 
-- Every length (window, horizon, rebalance interval, train/test fold, purge, embargo) is an
+- Every length (window, horizon, rebalance interval, train/test fold, purge) is an
   integer count of **bars**, never a calendar unit. Config keys carry a `_bars` suffix,
   e.g. `corr_window_bars: 400`.
 - Bar size is a property of the dataset only, written `<int><unit>` with unit `m` or `d`
@@ -17,6 +17,28 @@ consumer. Status: **DRAFT** — finalize after the first dry run.
   stamped 16:00 ET, including early-close days (conservative).
 - Annualization is the only calendar-aware step: `bars_per_year` is derived from bar size
   in one function (`1d` → 252, `65m` → 6 × 252).
+
+## Point-in-time inputs
+
+Every table a graph builder reads (prices, features, and any construction-specific
+source: commodity prices, BEA tables, filings, earnings events, news sentiment) has a
+tz-aware `America/New_York` column **`timestamp` meaning when the row became known**.
+
+- The loader that produces a source sets `timestamp` and owns its correctness, with its
+  own look-ahead test. Examples: bar end for prices; release date for BEA tables; filing
+  date (not period end) for filings; publication time for news.
+- Sources that only give a date use a conservative documented rule (e.g. a filing dated
+  `D` is known at `D` 16:00).
+- Revised data is one row per version, each with its own `timestamp`.
+- Data that never changes is stamped with the earliest date in the dataset.
+- Builders never read a source directly. The GraphBuilder base class sorts each input by
+  `timestamp` once, then passes `build_at(t, inputs)` only the rows each builder declared:
+  for a lookback of `L` bars, rows with `axis[i - L] < timestamp <= t` (all rows
+  `<= t` for `L = None`), where `axis[i] = t` on the universe's bar axis. For bar-aligned
+  data that is exactly the `L` bars ending at `t`; irregular rows (news, filings) between
+  bars fall into the next bar.
+- Correct timestamps do not cover leaks inside a source's own construction, e.g. a
+  sentiment model trained on later articles scoring earlier ones. Note these per source.
 
 ## Storage layout
 
@@ -80,6 +102,20 @@ consumers needing numpy or pandas convert at the edge.
 
 Every pipeline run logs the manifest of each dataset it reads to MLflow.
 
+## Labels
+
+`forward_returns(prices, horizon_bars)` returns `(timestamp, ticker, fwd_return, label_end)`,
+joined to snapshots on `(timestamp, ticker)`.
+
+- `fwd_return` at bar-axis position `i` is `open[i+1+h] / open[i+1] - 1`: enter at the next
+  bar's open, hold `horizon_bars` bars. The backtest uses the same open-to-open convention.
+- `label_end` is the timestamp of bar `i+1+h`, when the label is fully known; the
+  WalkForwardSplitter purges on it.
+- No row where the entry or exit bar is missing; such nodes are left out of the loss and IC.
+- Raw returns. Excess-over-benchmark returns are a reporting choice in the Evaluator; they
+  don't change rankings within a `t`.
+- `horizon_bars` is shared config, identical for every construction.
+
 ## GraphSnapshot
 
 The only object graph builders emit and the only graph input downstream stages consume.
@@ -87,7 +123,7 @@ One snapshot per bar-axis timestamp `t`. Arrays are numpy; the Dataset converts 
 without casting.
 
 **Rule: everything in a snapshot is known at `t`.** Labels (forward returns) are not part
-of it — a shared `labels(timestamp, node_ids)` function supplies them to training and eval.
+of it — `gnns.data.labels.forward_returns` supplies them to training and eval.
 
 ### Fields
 
@@ -132,3 +168,5 @@ empty, so edge attributes reach the model only when listed explicitly.
 - Survivorship: fixed present-day ticker lists exclude names delisted before today.
 - Unadjusted close column for price/liquidity universe filters.
 - Intraday: whether Massive's `65m` bars align to the 09:30 open; regular-hours filtering.
+- Intraday: one missing bar empties a whole volatility window; thin names at `1m` may need
+  partial windows (e.g. ≥ 80% of bars present) instead of frequent median fills.
