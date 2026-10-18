@@ -7,8 +7,8 @@ data:
   end: 2026-06-30         # inclusive
 
 graph: sector_etf_corr      # → config/graphs/sector_etf_corr.yaml
-snapshot_every_bars: 5      # shared by every construction; 5 daily bars ≈ weekly
-horizon_bars: 5             # label: enter at next bar's open, exit h bars later
+horizon_bars: 5             # label: enter at next bar's open, exit h bars later; also one
+                            # snapshot (and rebalance) every h bars. 5 daily bars ≈ weekly
 normalize: rank             # rank | zscore | none; model features, across nodes at each t
 
 walk_forward:
@@ -17,3 +17,17 @@ walk_forward:
   val_bars: 126             # ≈ 6 months; early stopping and tuning only
   test_bars: 252            # ≈ 1 year; also the step between folds
   holdout_start: 2024-01-01 # shared by every construction; may move later, never earlier
+
+train:
+  loss: listmle             # listmle
+  lr: 0.001
+  batch_size: 16            # snapshots per gradient step
+  max_epochs: 100
+  patience: 10              # epochs without a better validation IC before stopping
+  seed: 0
+
+eval:
+  quantiles: 11             # score buckets for the cascade (11 = one per sector ETF)
+  top_k: 3                  # names held in the top-k equity curve
+  benchmark: SPY            # ticker from the benchmarks universe
+  rolling_dates: 26         # window for the rolling IC line (26 weekly dates ≈ 6 months)

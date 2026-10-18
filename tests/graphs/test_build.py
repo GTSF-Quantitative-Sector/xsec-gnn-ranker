@@ -32,7 +32,7 @@ def _cfg(tmp_path, window_bars: int = 5, min_history_bars: int = 5) -> dict:
                 "list": [{"name": "momentum", "bars": 5}],
             },
         },
-        "snapshot_every_bars": 5,
+        "horizon_bars": 5,
     }
 
 

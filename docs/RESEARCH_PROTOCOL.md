@@ -22,28 +22,37 @@ Nothing may use information that was not known at the time it is used.
 | :-- | :-- | :-- |
 | graph params (e.g. `window_bars`), feature windows, model params (lr, hidden size, heads, dropout) | tuning | grid search on search folds' validation, then frozen (below) |
 | `min_history_bars`, purge gap | derived | follow from the settings above (`>=` longest window; `horizon_bars + 1`) |
-| `horizon_bars`, `snapshot_every_bars` | define the strategy | separate experiments (below) |
+| `horizon_bars` | defines the strategy | horizon experiment (below) |
 | `train_bars`, `val_bars`, `test_bars` | experiment design | fixed up front; sensitivity checks only |
 | held-out start | grading line | fixed up front; may move later as data grows, never earlier |
 
 Only the first row is ever grid-searched. Never pick a setting from another row by its
 test or held-out results.
 
-### Alternative experiments (horizon and cadence)
+`horizon_bars` is both the label horizon and the spacing between snapshots: one snapshot
+(and one rebalance) every `horizon_bars` bars, so consecutive labels never overlap and each
+rebalance's return is exactly one label.
 
-Changing `horizon_bars` (e.g. 21 ≈ one month) or `snapshot_every_bars` (e.g. 1 = daily
-rebalancing) defines a different strategy, not better settings for the same one. To try
-them:
+### Horizon experiment
 
-1. Pick candidate versions on economic grounds (the IC trades on weeks-to-months horizons).
-2. Run each as a full experiment on the search folds, with its own tuning sweep inside.
-3. Compare on cost-adjusted backtest metrics (Sharpe, IR, drawdown, turnover), not raw IC:
-   ICs at different horizons are not comparable.
-4. Report how many versions were tried; choose one (at most a few) before the held-out test.
+The horizon is chosen by experiment, not fixed in advance. For each candidate (e.g. 5, 10,
+21, 63 bars):
 
-When `horizon_bars > snapshot_every_bars`, consecutive labels overlap: the IC series is
-autocorrelated and naive t-stats overstate significance; use overlap-adjusted errors.
-These settings never switch between folds.
+1. Run the full pipeline with that `horizon_bars`, including its own grid search over the
+   tuning settings, chosen on its search folds' validation as usual.
+2. Compare the tuned candidates on the **search folds'** cost-adjusted backtest (Sharpe,
+   information ratio, drawdown, turnover), with identical portfolio rules and costs. Not
+   raw IC: ICs at different horizons are not comparable. Use annualized ICIR
+   (`icir_annual`, logged per run) as the cross-horizon check on signal quality, and
+   favor horizons that are consistent across years and survive doubled costs.
+3. Choose the horizon (at most two finalists, named in advance) from step 2, then score the
+   finalists once on the held-out period and report all of them, plus how many horizons
+   were tried.
+
+The held-out backtest confirms the choice; it does not make it. Choosing the horizon by its
+held-out result would turn those years into another search period.
+
+A horizon never changes between folds.
 
 ### Experiment-design sensitivity
 
@@ -54,7 +63,8 @@ conclusion is robust; it is not a way to pick the best-looking result.
 
 Constructions share no node features: each chooses its own in its graph file, and some
 may not use prices at all. What they share is the target (`forward_returns` over
-`horizon_bars`), `snapshot_every_bars`, the folds and held-out period, and the Evaluator.
+`horizon_bars`, which also sets the snapshot spacing), the folds and held-out period, and
+the Evaluator.
 
 - **Matched baseline (required per construction):** the same node features and settings,
   with no graph (e.g. XGBoost or an MLP per node, or the same GNN with edges removed),

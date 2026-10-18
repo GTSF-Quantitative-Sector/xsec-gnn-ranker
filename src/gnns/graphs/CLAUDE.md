@@ -12,12 +12,12 @@ correlation builder that exercises the pipeline end to end.
 - Builders never load or slice data themselves. A construction-specific source (commodity
   prices, BEA tables, filings, news) gets a loader that sets the known-at `timestamp`,
   with its own look-ahead test, and is then passed in like prices and features.
-- Which timestamps are built (rebalance cadence) is the run's choice, not the builder's:
-  `snapshot_every_bars` in `config/config.yaml`, shared by every construction.
+- Which timestamps are built is the run's choice, not the builder's: one snapshot every
+  `horizon_bars` in `config/config.yaml`, shared by every construction.
 - Each construction has `config/graphs/<name>.yaml` (builder, universe, `params`, its own
   node `features`, `sources`). Constructions share no features; config holds values,
   builder code declares structure (inputs, lookbacks). Shared across constructions:
-  labels, `snapshot_every_bars`, `horizon_bars`, walk-forward and held-out settings.
+  labels and snapshot spacing (`horizon_bars`), walk-forward and held-out settings.
 - New builders are registered in `BUILDERS` in `build.py`; `params` become keyword
   arguments of the builder's `__init__`.
 - `build_snapshots` checks the graph's `features.min_history_bars` covers the builder's

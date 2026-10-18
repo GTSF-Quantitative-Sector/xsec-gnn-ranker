@@ -1,12 +1,11 @@
 """Build the configured price datasets: fetch -> adjust -> validate -> write."""
 
-import subprocess
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 import polars as pl
 
-from gnns.config import CONFIG_DIR, ROOT
+from gnns.config import CONFIG_DIR, ROOT, git_sha
 from gnns.data import massive, store
 
 
@@ -23,7 +22,7 @@ def build(cfg: dict) -> list[Path]:
     built_at = datetime.now(UTC).isoformat()
     fetched = {u: _fetch(u, start, end) for u in cfg["data"]["universes"]}
 
-    git_sha, dests = _git_sha(), []
+    sha, dests = git_sha(), []
     for universe, (tickers, prices) in fetched.items():
         dest = ROOT / cfg["data_root"] / universe / bar
         manifest = {
@@ -33,7 +32,7 @@ def build(cfg: dict) -> list[Path]:
             "end": str(end),
             "tickers": tickers,
             "built_at": built_at,
-            "git_sha": git_sha,
+            "git_sha": sha,
         }
         store.write(prices, dest, manifest)
         dests.append(dest)
@@ -47,14 +46,3 @@ def _fetch(universe: str, start: date, end: date) -> tuple[list[str], pl.DataFra
     prices = store.adjust(prices, divs)
     store.validate(prices, tickers, start, end)
     return tickers, prices
-
-
-def _git_sha() -> str:
-    """HEAD, suffixed -dirty if src/ has uncommitted changes (config edits don't count)."""
-
-    def git(*args: str) -> str:
-        cmd = ["git", *args]
-        return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, check=True).stdout
-
-    dirty = git("status", "--porcelain", "--", "src").strip()
-    return git("rev-parse", "HEAD").strip() + ("-dirty" if dirty else "")

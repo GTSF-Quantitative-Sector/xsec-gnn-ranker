@@ -28,7 +28,7 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
   its window ending at `t` (`src/gnns/graphs/base.py`); dummy builder is fully connected,
   weighted by |60-bar return correlation| with signed `corr` as an analysis-only edge
   column. Vectorized `pairwise_corr` in `src/gnns/graphs/stats.py` for reuse. Config:
-  `graph:` selects `config/graphs/<name>.yaml`; `snapshot_every_bars: 5`.
+  `graph:` selects `config/graphs/<name>.yaml`; one snapshot every `horizon_bars` (5).
   `gnns build-graphs` on sector_etfs: 818 snapshots (2010-03-31 to 2026-06-29), 9→11 nodes,
   72–110 edges, ~4 s.
 
@@ -42,7 +42,8 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
   anchored there): 10 search folds (tests 2013-12-26 to 2023-12-29), 3 held out.
 
 - **Research protocol notes:** `docs/RESEARCH_PROTOCOL.md` separates grid-searched settings
-  from strategy-defining (horizon, cadence) and experiment-design settings; records the
+  from the strategy-defining horizon (chosen by a horizon experiment) and experiment-design
+  settings; records the
   fixed-recipe hyperparameter selection and the held-out period.
 
 - **Env versions pinned:** direct dependencies in `environment.yml` pinned to exact
@@ -54,9 +55,27 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
   joined, unlabeled nodes kept and masked. Sector ETFs fold 1: 151 train / 26 val / 50 test
   samples; batched GATv2 forward runs on GPU.
 
+- **Steps 7–8, models, Trainer, Evaluator, MLflow:** `gnns train`. Models `gatv2`,
+  `graphsage`, `mlp` (`src/gnns/train/models.py`), loss `listmle` (`losses.py`), Adam with
+  early stopping on validation rank IC (`trainer.py`), run orchestration + MLflow logging
+  (`run.py`), metrics (`src/gnns/eval/`); charts on demand via `gnns report <run_id>`. Each construction trains its `model`
+  and matched `baseline` on search folds only. First sector-ETF run (10 folds, ~2.3 min on
+  GPU): mean test IC −0.004 (gatv2) vs −0.011 (mlp), i.e. no signal, as expected for the
+  dummy graph; the pipeline itself works end to end.
+
 ## Next
 
+- Investigate collapsed scores: on sector_etfs, GATv2 scores per date differ only in
+  the 5th decimal (near-constant ranking). Check lr, features, ListMLE on 9–11 nodes.
 - Finalize the data contract after 1m and 65m bars have been built.
-- Step 7: ModelFactory + LossFactory registries (GATv2, GraphSAGE; ListMLE) and the
-  Trainer (early stopping on validation).
+- Step 9: real graph builders (correlation / graphical lasso first).
+- Step 10: BacktestEngine (costs, turnover, drawdown, Sharpe/IR tearsheet).
+- `gnns sweep` (grid search). When building it, first split `train/run.py:run()` along
+  its seams: build (snapshots, labels, folds, datasets), train (each model per fold),
+  summarize (metrics), log (MLflow). `gnns train` calls all four; the sweep builds once
+  per graph/feature setting, trains each model combination on it, logs every run's
+  metrics without predictions, and attaches predictions only for the best run by
+  validation IC (keep-best-so-far in memory, no retraining).
+- Extension: a richer interactive results viewer (beyond MLflow + PNGs), possibly a
+  separate project.
 - Universe open questions (CONTRACTS.md): ticker identity, survivorship, unadjusted close.

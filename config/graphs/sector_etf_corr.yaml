@@ -9,3 +9,17 @@ features:                   # this construction's equity node features
     - {name: momentum, bars: 20}
     - {name: momentum, bars: 60}
     - {name: volatility, bars: 20}
+extra_model_features: []    # builder-added node columns to also feed the model
+model_edge_attrs: []        # edge columns fed to the model (edge_weight always is)
+
+model:                      # gatv2 | graphsage | mlp; other keys are model arguments
+  name: gatv2
+  hidden: 32
+  layers: 2
+  heads: 2
+  dropout: 0.1
+baseline:                   # matched no-graph baseline: same features, no edges
+  name: mlp
+  hidden: 32
+  layers: 2
+  dropout: 0.1

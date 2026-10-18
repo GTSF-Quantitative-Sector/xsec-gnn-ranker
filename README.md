@@ -85,10 +85,34 @@ Needs the construction's universe built first (`gnns build-data`).
            - {name: volatility, bars: 20}
 
 2. Settings shared by every construction stay in `config/config.yaml`, e.g.
-   `snapshot_every_bars: 5` (one snapshot every 5 bars, ≈ weekly on daily data).
+   `horizon_bars: 5`: each label is the return over the next 5 bars, and there is one
+   snapshot (and one rebalance) every 5 bars, ≈ weekly on daily data.
 
 3. Run `gnns build-graphs`. It builds every snapshot in memory and prints a summary
    (count, date range, node and edge counts); nothing is written to disk.
 
 `min_history_bars` must cover the builder's price window (e.g. `window_bars`); the command
 stops with an error otherwise.
+
+### Train, evaluate and plot
+
+Needs the construction's universe and the `benchmarks` universe built (`gnns build-data`).
+
+1. In the construction's graph file, set the `model` (`gatv2`, `graphsage` or `mlp`) and
+   its matched no-graph `baseline` (normally `mlp`), plus `extra_model_features` and
+   `model_edge_attrs` if a builder adds columns the model should see.
+2. Shared settings in `config/config.yaml`: `train` (loss, learning rate, batch size,
+   epochs, early-stopping patience, seed), `eval` (quantiles, top-k, benchmark ticker,
+   rolling-IC window) and `normalize`.
+3. Run `gnns train`. It trains the model and the baseline on every search fold (held-out
+   folds are never touched), stopping early on validation rank IC, scores each fold's
+   test period, and logs an MLflow run: resolved config, git SHA, dataset manifest,
+   test IC metrics, validation IC (`<model>_val_ic`, the column to compare runs on),
+   training histories and predictions. It makes no charts, and prints the run id.
+4. Browse runs with `mlflow ui --backend-store-uri sqlite:///mlflow.db` (open
+   http://127.0.0.1:5000). Runs live in the gitignored `mlflow.db` and `mlruns/`.
+5. For a run worth a closer look, run `gnns report <run_id>`. It makes the charts from that
+   run's saved predictions (no retraining, a few seconds) and attaches them to the run:
+   rank IC over time, cumulative IC, IC by fold (model vs baseline), quantile cascade,
+   quantile equity curves, top-k equity curves vs equal-weight and the benchmark (no
+   costs; the full backtest is a later step), and per-fold training curves.

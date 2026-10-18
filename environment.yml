@@ -6,6 +6,8 @@ dependencies:
   - pip=26.2.1
   - numpy=2.5.4
   - polars=2.0.0
+  - matplotlib=3.11.2
+  - mlflow=3.17.0
   - pytorch=2.14.1         # conda picks the CUDA build when an NVIDIA driver is present
   - pytorch_geometric=2.8.1
   - python-dotenv=1.2.4

@@ -12,7 +12,7 @@ BUILDERS: dict[str, type[GraphBuilder]] = {
 
 
 def build_snapshots(cfg: dict) -> list[GraphSnapshot]:
-    """One snapshot every `snapshot_every_bars` bars, wherever any node is eligible."""
+    """One snapshot every `horizon_bars` bars, wherever any node is eligible."""
     graph = cfg["graph"]
     if graph["builder"] not in BUILDERS:
         raise ValueError(f"unknown builder {graph['builder']!r}; valid: {sorted(BUILDERS)}")
@@ -33,6 +33,4 @@ def build_snapshots(cfg: dict) -> list[GraphSnapshot]:
         )
 
     eligible = set(feats["timestamp"])
-    return [
-        builder.build(t) for t in axis.gather_every(cfg["snapshot_every_bars"]) if t in eligible
-    ]
+    return [builder.build(t) for t in axis.gather_every(cfg["horizon_bars"]) if t in eligible]
