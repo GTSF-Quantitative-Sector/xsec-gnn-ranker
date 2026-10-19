@@ -1,0 +1,20 @@
+name: gnns
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.15
+  - pip=26.2.1
+  - numpy=2.5.4
+  - polars=2.0.0
+  - matplotlib=3.11.2
+  - mlflow=3.17.0
+  - pytorch=2.14.1         # conda picks the CUDA build when an NVIDIA driver is present
+  - pytorch_geometric=2.8.1
+  - python-dotenv=1.2.4
+  - pyyaml=6.0.3
+  - requests=2.34.2
+  - pytest=9.1.1
+  - ruff=0.17.0
+  - pyright=1.1.414
+  - pip:
+      - -e .

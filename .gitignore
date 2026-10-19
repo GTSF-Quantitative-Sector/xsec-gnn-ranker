@@ -1,0 +1,9 @@
+.env
+config/machine.yaml
+*.egg-info/
+/data/
+/mlruns/
+/mlflow.db
+.vscode/
+__pycache__/
+.pytest_cache/
