@@ -3,6 +3,36 @@
 Cross-sectional GNN stock ranker (GTSF Quant Sector). Research plan:
 [docs/project_overview.md](docs/project_overview.md). Current status: [docs/PLAN.md](docs/PLAN.md).
 
+## Macro-sensitivity construction
+
+The macro research integration is documented in [docs/MACRO_INTEGRATION.md](docs/MACRO_INTEGRATION.md).
+It uses the shared snapshot trainer and reporting pipeline; it is not the temporal pilot or
+an exact THGNN implementation. Real runs require longer credit history with verified
+availability timing and the team's price datasets. The legacy pilot CSVs do not satisfy
+that source contract.
+
+With those inputs present, select this construction locally in `config/machine.yaml`
+(leave the tracked shared config unchanged):
+
+```yaml
+graph: macro_sensitivity
+normalize: none
+```
+
+Then use the existing `gnns build-graphs`, `gnns train` and `gnns report <run_id>` commands.
+Shared labels, horizon, folds and holdout settings are retained. `machine.yaml` entries
+override top-level shared settings; nested blocks replace entire blocks, not individual keys.
+
+To run synthetic integration checks from the activated team environment:
+
+```text
+python -m pytest tests/graphs/test_macro.py
+```
+
+These tests exercise graph construction, causal input handling, model training, MLflow
+artifacts and reporting on generated fixtures only. They establish software compatibility,
+not predictive performance or real-data availability.
+
 ## Setup
 
     conda env create -f environment.yml

@@ -113,6 +113,11 @@ def _log_mlflow(cfg: dict, summary: dict, out: Path, root: Path) -> str:
         (out / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
         manifest = root / cfg["graph"]["universe"] / cfg["data"]["bar"] / "manifest.json"
         (out / "manifest.json").write_text(manifest.read_text())
+        for name, spec in cfg["graph"].get("sources", {}).items():
+            source = root / spec["path"]
+            (out / f"source_manifest_{name}.json").write_text(
+                source.with_suffix(".json").read_text()
+            )
         for label, s in summary.items():
             mlflow.log_metrics({f"{label}_{k}": v for k, v in s.items() if k != "fold_ic"})
             for fold, ic in enumerate(s["fold_ic"], start=1):

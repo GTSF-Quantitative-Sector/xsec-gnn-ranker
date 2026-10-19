@@ -13,10 +13,13 @@ def load_config() -> dict:
     cfg = yaml.safe_load((CONFIG_DIR / "config.yaml").read_text()) or {}
     machine_path = CONFIG_DIR / "machine.yaml"
     machine = (yaml.safe_load(machine_path.read_text()) or {}) if machine_path.exists() else {}
+    # Resolve graph after applying local overrides, so a researcher can select a
+    # construction without editing the team's tracked config/config.yaml.
+    cfg = {**cfg, "data_root": "data", **machine}
     if name := cfg.get("graph"):
         graph = yaml.safe_load((CONFIG_DIR / "graphs" / f"{name}.yaml").read_text())
         cfg["graph"] = {"name": name, **graph}
-    return {**cfg, "data_root": "data", **machine}
+    return cfg
 
 
 def mlflow_tracking_uri() -> str:
