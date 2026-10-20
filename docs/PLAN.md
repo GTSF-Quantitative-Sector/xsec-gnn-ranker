@@ -63,6 +63,9 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
   GPU): mean test IC −0.004 (gatv2) vs −0.011 (mlp), i.e. no signal, as expected for the
   dummy graph; the pipeline itself works end to end.
 
+- **Parallel work:** `scripts/slot.py` manages reusable worktree slots with their own envs
+  (README, "Working on several branches at once"). Slots 1–3 set up.
+
 ## Next
 
 - Collapsed scores / no learning on sector_etfs. Planted-signal tests
