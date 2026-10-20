@@ -34,6 +34,13 @@ Per-machine settings go in `config/machine.yaml` (gitignored, optional):
 
     data_root: data   # where datasets are written (default: data/)
 
+### CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`,
+`pyright` and `pytest` on Ubuntu for every push to `main` and every pull request, in an
+env built from `environment.yml`. Results are on the repo's Actions tab and on each pull
+request. Run the same four commands locally before pushing.
+
 ### Working on several branches at once (slots)
 
 The repo folder (home) stays on `main`. Parallel tasks run in **slots**: reusable git
