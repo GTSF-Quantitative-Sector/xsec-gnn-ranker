@@ -106,8 +106,58 @@ def equity_curves(series: dict[str, pl.DataFrame], path: Path) -> None:
     _save(fig, path)
 
 
+def score_spread(preds: dict[str, pl.DataFrame], path: Path) -> None:
+    """Per-date gap between the highest and lowest score. Near zero means the model gives
+    every node about the same score, so its ranking is noise."""
+    fig, ax = plt.subplots(figsize=(11, 4))
+    for label, p in preds.items():
+        s = p.group_by("timestamp").agg(spread=pl.col("score").max() - pl.col("score").min())
+        s = s.sort("timestamp")
+        ax.plot(s["timestamp"], s["spread"], label=f"{label} (median {s['spread'].median():.2g})")
+    ax.set(title="Score spread per date (max - min)", ylabel="spread", yscale="log")
+    ax.legend()
+    _save(fig, path)
+
+
+def feature_importance(importances: dict[str, list[dict[str, float]]], path: Path) -> None:
+    """Permutation importance per input (and "edges"), per model: bar = mean over folds,
+    error bar = spread (std) across folds. Above zero: the model relies on it and it helps
+    on validation dates; around zero: unused; below zero: it hurts out of sample."""
+    keys = list(next(iter(importances.values()))[0])
+    fig, ax = plt.subplots(figsize=(max(6, 1.4 * len(keys)), 4))
+    width = 0.8 / len(importances)
+    for i, (label, folds) in enumerate(importances.items()):
+        vals = np.array([[f[k] for k in keys] for f in folds])
+        x = np.arange(len(keys)) + (i - (len(importances) - 1) / 2) * width
+        ax.bar(x, vals.mean(0), width=width, yerr=vals.std(0), capsize=3, label=label)
+    ax.set_xticks(np.arange(len(keys)), keys, rotation=20)
+    ax.axhline(0, color="black", lw=0.8)
+    ax.set(
+        title="Permutation importance (validation IC drop when the input is scrambled)",
+        ylabel="IC drop",
+    )
+    ax.legend()
+    _save(fig, path)
+
+
+def feature_correlation(corr: np.ndarray, names: list[str], path: Path) -> None:
+    """Average within-date rank correlation between features: high |value| means the two
+    inputs overlap, so permute or ablate them as a group."""
+    fig, ax = plt.subplots(figsize=(1.2 * len(names) + 2.5, 1.0 * len(names) + 1.8))
+    im = ax.imshow(corr, vmin=-1, vmax=1, cmap="RdBu_r")
+    ax.set_xticks(range(len(names)), names, rotation=30, ha="right")
+    ax.set_yticks(range(len(names)), names)
+    for i in range(len(names)):
+        for j in range(len(names)):
+            ax.text(j, i, f"{corr[i, j]:.2f}", ha="center", va="center", fontsize=9)
+    fig.colorbar(im, ax=ax)
+    ax.set_title("Feature correlation (within-date rank, search period)")
+    _save(fig, path)
+
+
 def training_curves(histories: dict[str, list[list[dict]]], path: Path) -> None:
-    """Per fold: validation IC (solid) and training loss (dashed), best epoch marked."""
+    """Per fold: validation IC (solid), training loss (dashed), best epoch, and the loss of
+    giving every node the same score (grey dotted): a loss on that line learned nothing."""
     n = len(next(iter(histories.values())))
     cols = min(n, 5)
     rows = -(-n // cols)
@@ -122,11 +172,18 @@ def training_curves(histories: dict[str, list[list[dict]]], path: Path) -> None:
             loss_ax.plot(h["epoch"], h["train_loss"], color=color, ls="--", alpha=0.5)
             best = h.filter(pl.col("val_ic") == pl.col("val_ic").max())["epoch"][0]
             ax.axvline(best, color=color, lw=0.8, alpha=0.6)
+        first = next(iter(histories.values()))[f]
+        ref = next((e["no_info_loss"] for e in first if "no_info_loss" in e), None)
+        if ref is not None:  # runs before this reference was logged have none
+            loss_ax.axhline(ref, color="grey", ls=":", lw=1.2)
         ax.set_title(f"fold {f + 1}", fontsize=9)
         ax.tick_params(labelsize=7)
         loss_ax.tick_params(labelsize=7)
     for f in range(n, rows * cols):
         axes[f // cols][f % cols].axis("off")
     axes[0][0].legend(fontsize=7)
-    fig.suptitle("Training curves: val IC (solid, left), train loss (dashed, right), best epoch")
+    fig.suptitle(
+        "Training curves: val IC (solid, left), train loss (dashed, right), best epoch, "
+        "no-information loss (grey dotted)"
+    )
     _save(fig, path)

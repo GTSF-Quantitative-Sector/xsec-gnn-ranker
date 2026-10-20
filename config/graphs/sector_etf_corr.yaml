@@ -15,11 +15,11 @@ model_edge_attrs: []        # edge columns fed to the model (edge_weight always 
 model:                      # gatv2 | graphsage | mlp; other keys are model arguments
   name: gatv2
   hidden: 32
-  layers: 2
+  layers: 1                 # fully connected graph: one hop reaches every ETF; 2 oversmoothed
   heads: 2
   dropout: 0.1
 baseline:                   # matched no-graph baseline: same features, no edges
   name: mlp
-  hidden: 32
-  layers: 2
+  hidden: 32                # same width and depth as the model
+  layers: 1
   dropout: 0.1

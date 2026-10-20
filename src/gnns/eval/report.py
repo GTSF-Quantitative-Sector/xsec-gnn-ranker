@@ -1,6 +1,7 @@
 """`gnns report <run_id>`: make the evaluation charts for one MLflow run and attach them to it.
 
-Reads only the run's own artifacts (predictions, histories, config), so it never retrains.
+Reads the run's own artifacts (predictions, histories, importance, config), plus the
+price data for the benchmark and feature-correlation charts. It never retrains.
 """
 
 import json
@@ -9,11 +10,14 @@ import tempfile
 from pathlib import Path
 
 import mlflow
+import numpy as np
 import polars as pl
 import yaml
 from mlflow.artifacts import download_artifacts
 
 from gnns.config import ROOT, mlflow_tracking_uri
+from gnns.data import features
+from gnns.data.features import column_names
 from gnns.data.labels import forward_returns
 from gnns.eval import metrics, plots
 
@@ -29,9 +33,19 @@ def report(run_id: str, data_root: str) -> list[str]:
         files = sorted(src.glob("predictions_*.parquet"))
         preds = {f.stem.removeprefix("predictions_"): pl.read_parquet(f) for f in files}
         histories = json.loads((src / "histories.json").read_text())
+        imp_path = src / "importance.json"  # absent for runs trained before it existed
+        importances = json.loads(imp_path.read_text()) if imp_path.exists() else None
         out = Path(tmp) / "charts"
         out.mkdir()
-        make_charts(preds, histories, cfg, _benchmark(cfg, data_root), out)
+        make_charts(
+            preds,
+            histories,
+            cfg,
+            _benchmark(cfg, data_root),
+            out,
+            importances,
+            _feature_corr(cfg, data_root),
+        )
         with mlflow.start_run(run_id=run_id):
             mlflow.log_artifacts(str(out))
         return sorted(p.name for p in out.iterdir())
@@ -43,6 +57,8 @@ def make_charts(
     cfg: dict,
     benchmark: pl.DataFrame | None,
     out: Path,
+    importances: dict[str, list[dict[str, float]]] | None = None,
+    feature_corr: tuple[np.ndarray, list[str]] | None = None,
 ) -> None:
     """Write the PNGs for one run. `preds` maps model label -> predictions table."""
     eval_cfg = cfg["eval"]
@@ -68,7 +84,12 @@ def make_charts(
     plots.quantile_cascade(qrets, out / "5_quantile_cascade.png")
     plots.quantile_curves(qrets[first_label], first_label, out / "6_quantile_curves.png")
     plots.equity_curves(curves, out / "7_equity_curves.png")
+    plots.score_spread(preds, out / "8_score_spread.png")
+    if importances is not None:
+        plots.feature_importance(importances, out / "9_feature_importance.png")
     plots.training_curves(histories, out / "10_training_curves.png")
+    if feature_corr is not None:
+        plots.feature_correlation(*feature_corr, out / "11_feature_correlation.png")
 
 
 def _fold_ic(ic: pl.DataFrame, pred: pl.DataFrame) -> pl.DataFrame:
@@ -81,6 +102,20 @@ def _fold_ic(ic: pl.DataFrame, pred: pl.DataFrame) -> pl.DataFrame:
         .join(folds, on="fold")
         .sort("fold")
     )
+
+
+def _feature_corr(cfg: dict, data_root: str) -> tuple[np.ndarray, list[str]] | None:
+    """Within-date correlation of the construction's features, search period only."""
+    graph = cfg["graph"]
+    path = ROOT / data_root / graph["universe"] / cfg["data"]["bar"] / "prices.parquet"
+    if not path.exists():
+        log.warning("%s dataset not built; skipping feature correlation", graph["universe"])
+        return None
+    names = column_names(graph["features"]["list"])
+    feats = features.compute(pl.read_parquet(path), graph["features"]).filter(
+        pl.col("timestamp").dt.date() < cfg["walk_forward"]["holdout_start"]
+    )
+    return metrics.cross_sectional_corr(feats, names), names
 
 
 def _benchmark(cfg: dict, data_root: str) -> pl.DataFrame | None:

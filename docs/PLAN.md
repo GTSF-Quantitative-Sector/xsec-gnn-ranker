@@ -65,8 +65,13 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
 
 ## Next
 
-- Investigate collapsed scores: on sector_etfs, GATv2 scores per date differ only in
-  the 5th decimal (near-constant ranking). Check lr, features, ListMLE on 9–11 nodes.
+- Collapsed scores / no learning on sector_etfs. Planted-signal tests
+  (`tests/train/test_planted_signal.py`) show the training code learns. Found: with
+  `lr: 0.001` + `patience: 10`, GATv2 cannot learn even a strong planted signal (test IC
+  −0.06 vs 0.62): it starts flat and early stopping ends training before it moves.
+  `lr: 0.01` or a much larger patience fixes it. Defaults now `lr: 0.01`, `patience: 20`,
+  and `layers: 1` for the fully connected sector-ETF graph (2 layers oversmoothed).
+  Next: rerun the sector-ETF baseline with these defaults.
 - Finalize the data contract after 1m and 65m bars have been built.
 - Step 9: real graph builders (correlation / graphical lasso first).
 - Step 10: BacktestEngine (costs, turnover, drawdown, Sharpe/IR tearsheet).
@@ -76,6 +81,11 @@ Pipeline status against the Infrastructure steps in `project_overview.md`.
   per graph/feature setting, trains each model combination on it, logs every run's
   metrics without predictions, and attaches predictions only for the best run by
   validation IC (keep-best-so-far in memory, no retraining).
+- Ablation mechanism, built on `gnns sweep`: rerun a construction with a feature (or a
+  correlated group, per the feature-correlation chart) removed, or with edges removed,
+  across several seeds; compare mean validation IC paired by fold and seed. This is the
+  decision-grade test for keeping or dropping inputs; permutation importance only shows
+  how much a trained model relies on them.
 - Extension: a richer interactive results viewer (beyond MLflow + PNGs), possibly a
   separate project.
 - Universe open questions (CONTRACTS.md): ticker identity, survivorship, unadjusted close.

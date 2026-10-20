@@ -74,6 +74,13 @@ the Evaluator.
 - **Price-only reference (optional):** a construction config using only price features
   (e.g. momentum, volatility), as a simple anchor for presenting results.
 
+## Run-to-run noise
+
+GPU training is not bit-for-bit reproducible (PyG's message passing sums in a varying
+order), and a single seed is one draw of weight initialization and shuffling. Never
+compare two settings on one run each: run every candidate with several seeds (e.g. 3,
+via `train.seed`) and compare the averages, alongside their spread.
+
 ## Hyperparameter selection
 
 Grid-searched settings are chosen once, from the search folds' average validation IC, and

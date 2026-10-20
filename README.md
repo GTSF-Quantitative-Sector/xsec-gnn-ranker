@@ -115,4 +115,6 @@ Needs the construction's universe and the `benchmarks` universe built (`gnns bui
    run's saved predictions (no retraining, a few seconds) and attaches them to the run:
    rank IC over time, cumulative IC, IC by fold (model vs baseline), quantile cascade,
    quantile equity curves, top-k equity curves vs equal-weight and the benchmark (no
-   costs; the full backtest is a later step), and per-fold training curves.
+   costs; the full backtest is a later step), score spread, permutation importance per
+   input and for edges (`eval.permutation_repeats`), per-fold training curves with the
+   no-information loss line, and the feature correlation matrix (search period).
