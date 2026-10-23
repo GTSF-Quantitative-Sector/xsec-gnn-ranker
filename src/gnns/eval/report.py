@@ -1,7 +1,8 @@
 """`gnns report <run_id>`: make the evaluation charts for one MLflow run and attach them to it.
 
 Reads the run's own artifacts (predictions, histories, importance, config), plus the
-price data for the benchmark and feature-correlation charts. It never retrains.
+price data for the feature-correlation chart. It never retrains. Commands that produce a
+run call it afterwards (`gnns.cli`); the portfolio charts come from `gnns backtest`.
 """
 
 import json
@@ -18,7 +19,6 @@ from mlflow.artifacts import download_artifacts
 from gnns.config import ROOT, mlflow_tracking_uri
 from gnns.data import features
 from gnns.data.features import column_names
-from gnns.data.labels import forward_returns
 from gnns.eval import metrics, plots
 
 log = logging.getLogger(__name__)
@@ -37,15 +37,7 @@ def report(run_id: str, data_root: str) -> list[str]:
         importances = json.loads(imp_path.read_text()) if imp_path.exists() else None
         out = Path(tmp) / "charts"
         out.mkdir()
-        make_charts(
-            preds,
-            histories,
-            cfg,
-            _benchmark(cfg, data_root),
-            out,
-            importances,
-            _feature_corr(cfg, data_root),
-        )
+        make_charts(preds, histories, cfg, out, importances, _feature_corr(cfg, data_root))
         with mlflow.start_run(run_id=run_id):
             mlflow.log_artifacts(str(out))
         return sorted(p.name for p in out.iterdir())
@@ -55,7 +47,6 @@ def make_charts(
     preds: dict[str, pl.DataFrame],
     histories: dict[str, list[list[dict]]],
     cfg: dict,
-    benchmark: pl.DataFrame | None,
     out: Path,
     importances: dict[str, list[dict[str, float]]] | None = None,
     feature_corr: tuple[np.ndarray, list[str]] | None = None,
@@ -67,23 +58,14 @@ def make_charts(
         label: metrics.quantile_returns(p, eval_cfg["quantiles"]) for label, p in preds.items()
     }
     fold_ics = {label: _fold_ic(ics[label], p) for label, p in preds.items()}
-    curves = {
-        f"{label} top-{eval_cfg['top_k']}": metrics.top_k_returns(p, eval_cfg["top_k"])
-        for label, p in preds.items()
-    }
-    first_label, first = next(iter(preds.items()))
-    curves["equal-weight universe"] = metrics.universe_returns(first)
-    if benchmark is not None:
-        curves[eval_cfg["benchmark"]] = benchmark.join(
-            first.select("timestamp").unique(), on="timestamp"
-        ).sort("timestamp")
+    first_label = next(iter(preds))
 
     plots.ic_over_time(ics, eval_cfg["rolling_dates"], out / "1_ic_over_time.png")
     plots.cumulative_ic(ics, out / "3_cumulative_ic.png")
     plots.ic_by_fold(fold_ics, out / "4_ic_by_fold.png")
     plots.quantile_cascade(qrets, out / "5_quantile_cascade.png")
     plots.quantile_curves(qrets[first_label], first_label, out / "6_quantile_curves.png")
-    plots.equity_curves(curves, out / "7_equity_curves.png")
+    # 7 was the no-cost top-k preview, replaced by gnns backtest's backtest/1_equity.png
     plots.score_spread(preds, out / "8_score_spread.png")
     if importances is not None:
         plots.feature_importance(importances, out / "9_feature_importance.png")
@@ -116,15 +98,3 @@ def _feature_corr(cfg: dict, data_root: str) -> tuple[np.ndarray, list[str]] | N
         pl.col("timestamp").dt.date() < cfg["walk_forward"]["holdout_start"]
     )
     return metrics.cross_sectional_corr(feats, names), names
-
-
-def _benchmark(cfg: dict, data_root: str) -> pl.DataFrame | None:
-    """(timestamp, ret) forward returns of the benchmark ticker, or None if not built."""
-    path = ROOT / data_root / "benchmarks" / cfg["data"]["bar"] / "prices.parquet"
-    if not path.exists():
-        log.warning("benchmarks dataset not built; skipping %s", cfg["eval"]["benchmark"])
-        return None
-    bench = forward_returns(pl.read_parquet(path), cfg["horizon_bars"])
-    return bench.filter(pl.col("ticker") == cfg["eval"]["benchmark"]).select(
-        "timestamp", ret="fwd_return"
-    )
