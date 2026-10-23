@@ -60,7 +60,7 @@ def run_backtest(
     metrics keyed `<model>_<metric>`. One rebalance every `horizon_bars` bars of `bar`."""
     per_year = metrics.bars_per_year(bar) / horizon_bars  # rebalances per year
     universe = metrics.universe_returns(next(iter(preds.values()))).rename({"ret": "universe"})
-    periods, results = {}, {}
+    rebalances, results = {}, {}
     for label, pred in preds.items():
         try:
             p = bt.simulate(pred, settings["top_k"], settings["weighting"])
@@ -74,19 +74,19 @@ def run_backtest(
                 f"{settings['risk_free']} return, first {missing['timestamp'][0]}"
             )
         p = p.join(refs, on="timestamp").join(universe, on="timestamp")
-        p.write_parquet(out / f"periods_{label}.parquet")
-        periods[label] = p
+        p.write_parquet(out / f"rebalances_{label}.parquet")
+        rebalances[label] = p
         summary = bt.summarize(p, settings["cost_bps"], per_year)
         results |= {f"{label}_{k}": v for k, v in summary.items()}
     years = {
         f"{label} {bps:g} bps": bt.yearly(p, bps, per_year)
-        for label, p in periods.items()
+        for label, p in rebalances.items()
         for bps in settings["cost_bps"]
     }
     plots.backtest_equity(
-        periods, settings["cost_bps"], settings["benchmark"], out / "1_equity.png"
+        rebalances, settings["cost_bps"], settings["benchmark"], out / "1_equity.png"
     )
-    plots.backtest_drawdown(periods, settings["cost_bps"], out / "2_drawdown.png")
+    plots.backtest_drawdown(rebalances, settings["cost_bps"], out / "2_drawdown.png")
     held = f"each held {horizon_bars} bars of {bar}"
     plots.backtest_per_year(years, held, out / "3_per_year.png")
     return results

@@ -36,8 +36,8 @@ def test_run_backtest_writes_tables_charts_and_metrics(tmp_path):
         "1_equity.png",
         "2_drawdown.png",
         "3_per_year.png",
-        "periods_gatv2.parquet",
-        "periods_mlp.parquet",
+        "rebalances_gatv2.parquet",
+        "rebalances_mlp.parquet",
     ]
     assert {"gatv2_sharpe_3bps", "mlp_ir_0bps", "gatv2_break_even_bps"} <= m.keys()
 
