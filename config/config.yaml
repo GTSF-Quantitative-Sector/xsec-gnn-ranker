@@ -28,7 +28,12 @@ train:
 
 eval:
   quantiles: 11             # score buckets for the cascade (11 = one per sector ETF)
-  top_k: 3                  # names held in the top-k equity curve
-  benchmark: SPY            # ticker from the benchmarks universe
   permutation_repeats: 5    # shuffles per input for permutation importance (validation dates)
   rolling_dates: 26         # window for the rolling IC line (26 weekly dates ≈ 6 months)
+
+backtest:                   # gnns backtest <run_id>; also run after gnns train
+  top_k: 3                  # names held at each rebalance
+  weighting: equal          # equal (only option so far)
+  cost_bps: [0, 3, 6]       # per side, on traded value; every level reported (0 = gross)
+  benchmark: SPY            # from the benchmarks universe: excess return, IR, win rate vs it
+  risk_free: BIL            # from the benchmarks universe: Sharpe is on returns above it
