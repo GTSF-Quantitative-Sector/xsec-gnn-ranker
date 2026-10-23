@@ -30,7 +30,8 @@ def _refs(dates: list[datetime]) -> pl.DataFrame:
 
 
 def test_run_backtest_writes_tables_charts_and_metrics(tmp_path):
-    m = run_backtest({"gatv2": _pred(0), "mlp": _pred(1)}, _refs(DATES), SETTINGS, 52.0, tmp_path)
+    preds = {"gatv2": _pred(0), "mlp": _pred(1)}
+    m = run_backtest(preds, _refs(DATES), SETTINGS, 5, "1d", tmp_path)
     assert sorted(p.name for p in tmp_path.iterdir()) == [
         "1_equity.png",
         "2_drawdown.png",
@@ -43,7 +44,7 @@ def test_run_backtest_writes_tables_charts_and_metrics(tmp_path):
 
 def test_rebalance_dates_without_reference_returns_raise(tmp_path):
     with pytest.raises(ValueError, match="1 rebalance dates have no SPY or BIL"):
-        run_backtest({"gatv2": _pred(0)}, _refs(DATES[:-1]), SETTINGS, 52.0, tmp_path)
+        run_backtest({"gatv2": _pred(0)}, _refs(DATES[:-1]), SETTINGS, 5, "1d", tmp_path)
 
 
 def test_missing_risk_free_ticker_is_reported(tmp_path):

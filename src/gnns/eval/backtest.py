@@ -135,12 +135,13 @@ def _longest_run(mask: np.ndarray) -> int:
 
 
 def yearly(periods: pl.DataFrame, bps: float, per_year: float) -> pl.DataFrame:
-    """(year, net_return, sharpe) per calendar year of the rebalance date."""
+    """(year, rebalances, net_return, sharpe) per calendar year of the rebalance date."""
     excess = pl.col("r") - pl.col("risk_free")
     return (
         periods.select(pl.col("timestamp").dt.year().alias("year"), "risk_free", r=net(bps))
         .group_by("year")
         .agg(
+            rebalances=pl.len(),
             net_return=(1 + pl.col("r")).product() - 1,
             sharpe=excess.mean() / excess.std() * math.sqrt(per_year),
         )

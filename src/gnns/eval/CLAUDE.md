@@ -42,6 +42,11 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
 
 ## Backtest decisions
 
+- Terms: a backtest "period" is one rebalance = one snapshot's holding window =
+  `horizon_bars` bars = one label (snapshots are `horizon_bars` apart). Not a fold's
+  train/val/test period. The per-year chart is grouped by rebalance date and shows each
+  year's count (n): a fold starting in late December gives a one-rebalance stub year
+  wherever the boundary is put, so it is shown, not hidden.
 - `backtest.py` (engine, pure functions) and `backtest_run.py` (MLflow I/O, charts).
   Top-k equal weight, full rebalance each period; turnover = sum |target - drifted| (first
   rebalance buys from cash). Linear costs at every level in `cost_bps` (0 = gross);

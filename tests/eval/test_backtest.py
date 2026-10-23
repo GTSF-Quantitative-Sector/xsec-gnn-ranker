@@ -113,4 +113,5 @@ def test_yearly_compounds_within_calendar_years():
     p = _periods(GROSS, [0.0] * 4, [0.0] * 4, [0.0] * 4, start=datetime(2020, 12, 18, 16))
     y = backtest.yearly(p, 0, per_year=52)
     assert y["year"].to_list() == [2020, 2021]
+    assert y["rebalances"].to_list() == [2, 2]
     assert y["net_return"].to_list() == pytest.approx([1.02 * 0.99 - 1, 1.03 * 0.98 - 1])
