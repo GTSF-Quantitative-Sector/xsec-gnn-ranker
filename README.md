@@ -180,19 +180,56 @@ Needs the construction's universe and the `benchmarks` universe built (`gnns bui
    its matched no-graph `baseline` (normally `mlp`), plus `extra_model_features` and
    `model_edge_attrs` if a builder adds columns the model should see.
 2. Shared settings in `config/config.yaml`: `train` (loss, learning rate, batch size,
-   epochs, early-stopping patience, seed), `eval` (quantiles, top-k, benchmark ticker,
-   rolling-IC window) and `normalize`.
+   epochs, early-stopping patience, seed), `eval` (quantiles, permutation repeats,
+   rolling-IC window), `backtest` (see "Backtest") and `normalize`.
 3. Run `gnns train`. It trains the model and the baseline on every search fold (held-out
    folds are never touched), stopping early on validation rank IC, scores each fold's
    test period, and logs an MLflow run: resolved config, git SHA, dataset manifest,
    test IC metrics, validation IC (`<model>_val_ic`, the column to compare runs on),
-   training histories and predictions. It makes no charts, and prints the run id.
+   training histories and predictions. It then backtests the run (see "Backtest") and
+   makes its charts (step 5), and prints the run id with a backtest summary.
 4. Browse runs with `mlflow ui --backend-store-uri sqlite:///mlflow.db` (open
    http://127.0.0.1:5000). Runs live in the gitignored `mlflow.db` and `mlruns/`.
-5. For a run worth a closer look, run `gnns report <run_id>`. It makes the charts from that
-   run's saved predictions (no retraining, a few seconds) and attaches them to the run:
+5. Charts: `gnns train` makes them for its run. To remake them for any run (e.g. one
+   trained before a chart existed), run `gnns report <run_id>`. It works from that run's
+   saved predictions (no retraining, a few seconds) and attaches the charts to the run:
    rank IC over time, cumulative IC, IC by fold (model vs baseline), quantile cascade,
-   quantile equity curves, top-k equity curves vs equal-weight and the benchmark (no
-   costs; the full backtest is a later step), score spread, permutation importance per
+   quantile equity curves, score spread, permutation importance per
    input and for edges (`eval.permutation_repeats`), per-fold training curves with the
    no-information loss line, and the feature correlation matrix (search period).
+
+### Backtest
+
+Needs the `benchmarks` universe built with the `backtest.benchmark` and
+`backtest.risk_free` tickers (SPY and BIL in `config/universes/benchmarks.txt`).
+
+1. Set the `backtest` block in `config/config.yaml`:
+
+       backtest:
+         top_k: 3              # names held each period, equal weight
+         weighting: equal
+         cost_bps: [0, 3, 6]   # per side, on traded value; every level is reported
+         benchmark: SPY
+         risk_free: BIL
+
+2. `gnns train` backtests every run it logs (and skips with a message if the benchmarks
+   are not built). To backtest a run again, e.g. after changing `backtest:`, run
+   `gnns backtest <run_id>`: it uses the run's saved predictions, horizon and bar with the
+   current `backtest:` settings, and replaces the run's backtest metrics, `backtest.*`
+   tags and `backtest/` artifacts.
+
+At each rebalance (every `horizon_bars`, one per snapshot) the portfolio holds the `top_k`
+highest scores at equal weight, entering at the next bar's open like the labels, and
+trades back to those weights (turnover = sum of |target - drifted weight|; the first
+rebalance buys from cash), paying `cost_bps` per side on the traded value. Metrics per
+model and cost level (suffix `_<bps>bps`): `ann_return`, `ann_vol`, `sharpe` (over the
+risk-free return), `max_drawdown`, `max_dd_days` (longest time below a previous peak, in
+trading days), `excess_return`, `tracking_error`, `ir` (vs the benchmark), `win_rate`,
+`win_rate_vs_benchmark`, `cost_drag`; per model: `turnover` (one-way, per rebalance),
+`turnover_annual`, `break_even_bps` (the cost at which the portfolio stops beating the
+benchmark). Artifacts in `backtest/`: equity, drawdown and per-year charts, a per-period
+table per model (`periods_<model>.parquet`) and `backtest.yaml`. A held name without a
+forward return stops the backtest with an error.
+
+If you shrink `cost_bps`, metrics for levels you removed stay on the run from the earlier
+backtest; the `backtest.cost_bps` tag lists the current levels.

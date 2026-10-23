@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import polars as pl  # noqa: E402
 
+from gnns.eval.backtest import drawdown, net  # noqa: E402
+
 
 def _save(fig, path: Path) -> None:
     fig.tight_layout()
@@ -96,16 +98,6 @@ def quantile_curves(q: pl.DataFrame, label: str, path: Path) -> None:
     _save(fig, path)
 
 
-def equity_curves(series: dict[str, pl.DataFrame], path: Path) -> None:
-    """Growth of $1 for each return series (top-k portfolios, equal-weight universe, SPY)."""
-    fig, ax = plt.subplots(figsize=(11, 4))
-    for label, r in series.items():
-        ax.plot(r["timestamp"], (1 + r["ret"]).cum_prod(), label=label)
-    ax.set(title="Top-k equity curves (no costs)", ylabel="growth of $1", yscale="log")
-    ax.legend()
-    _save(fig, path)
-
-
 def score_spread(preds: dict[str, pl.DataFrame], path: Path) -> None:
     """Per-date gap between the highest and lowest score. Near zero means the model gives
     every node about the same score, so its ranking is noise."""
@@ -186,4 +178,50 @@ def training_curves(histories: dict[str, list[list[dict]]], path: Path) -> None:
         "Training curves: val IC (solid, left), train loss (dashed, right), best epoch, "
         "no-information loss (grey dotted)"
     )
+    _save(fig, path)
+
+
+def backtest_equity(
+    periods: dict[str, pl.DataFrame], cost_bps: list[float], benchmark: str, path: Path
+) -> None:
+    """Growth of $1 per model: top-k net of each cost level, equal-weight universe, benchmark."""
+    fig, axes = plt.subplots(len(periods), 1, figsize=(11, 3.5 * len(periods)), squeeze=False)
+    for ax, (label, p) in zip(axes[:, 0], periods.items(), strict=True):
+        t = p["timestamp"]
+        for bps in cost_bps:
+            ax.plot(t, (1 + p.select(net(bps)).to_series()).cum_prod(), label=f"top-k, {bps:g} bps")
+        ax.plot(t, (1 + p["universe"]).cum_prod(), color="grey", label="equal-weight universe")
+        ax.plot(t, (1 + p["benchmark"]).cum_prod(), color="black", label=benchmark)
+        ax.set(title=f"{label}: top-k backtest", ylabel="growth of $1", yscale="log")
+        ax.legend(fontsize=8)
+    _save(fig, path)
+
+
+def backtest_drawdown(periods: dict[str, pl.DataFrame], cost_bps: list[float], path: Path) -> None:
+    """How far each model's portfolio sits below its running peak, per cost level."""
+    fig, axes = plt.subplots(len(periods), 1, figsize=(11, 3 * len(periods)), squeeze=False)
+    for ax, (label, p) in zip(axes[:, 0], periods.items(), strict=True):
+        for bps in cost_bps:
+            r = p.select(net(bps)).to_series().to_numpy()
+            ax.plot(p["timestamp"], drawdown(r) * 100, label=f"{bps:g} bps")
+        ax.set(title=f"{label}: drawdown", ylabel="% below peak")
+        ax.legend(fontsize=8)
+    _save(fig, path)
+
+
+def backtest_per_year(years: dict[str, pl.DataFrame], path: Path) -> None:
+    """Net return and Sharpe per calendar year for each model and cost level: is the result
+    consistent across years, or carried by a few?"""
+    fig, (top, bottom) = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
+    width = 0.8 / len(years)
+    for i, (name, y) in enumerate(years.items()):
+        x = y["year"].to_numpy() + (i - (len(years) - 1) / 2) * width
+        top.bar(x, y["net_return"] * 100, width=width, label=name)
+        bottom.bar(x, y["sharpe"], width=width, label=name)
+    for ax in (top, bottom):
+        ax.axhline(0, color="black", lw=0.8)
+    bottom.set_xticks(next(iter(years.values()))["year"].to_list())
+    top.set(title="Backtest by calendar year", ylabel="net return (%)")
+    bottom.set(xlabel="year (rebalance date)", ylabel="Sharpe")
+    top.legend(fontsize=8, ncol=3)
     _save(fig, path)
