@@ -41,6 +41,15 @@ GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --ch
 env built from `environment.yml`. Results are on the repo's Actions tab and on each pull
 request. Run the same four commands locally before pushing.
 
+### Issue check
+
+`scripts/issue_check.py` checks the GitHub issue of the current branch (`<N>-<slug>` works
+on issue #N) and lists what still blocks its pull request. It needs `gh`, logged in
+(`gh auth login`).
+
+    python scripts/issue_check.py check        # what still blocks this branch's PR
+    python scripts/issue_check.py check --ci   # same, but exit 1 if anything does (CI)
+
 ### Working on several branches at once (slots)
 
 The repo folder (home) stays on `main`. Parallel tasks run in **slots**: reusable git
