@@ -18,7 +18,7 @@ def _pred(rows: list[tuple]) -> pl.DataFrame:
     )
 
 
-def _periods(gross, traded, bench, rf, start=T0) -> pl.DataFrame:
+def _rebalances(gross, traded, bench, rf, start=T0) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "timestamp": [start + timedelta(weeks=i) for i in range(len(gross))],
@@ -87,13 +87,13 @@ def test_held_name_without_return_raises_unheld_is_ignored():
 
 
 def test_summary_known_answers():
-    m = backtest.summarize(_periods(GROSS, TRADED, BENCH, [0.001] * 4), [0, 10], per_year=52)
+    m = backtest.summarize(_rebalances(GROSS, TRADED, BENCH, [0.001] * 4), [0, 10], per_year=52)
     assert m["turnover"] == pytest.approx(0.25)  # mean traded 0.5, one-way
     assert m["turnover_annual"] == pytest.approx(13.0)
     assert m["break_even_bps"] == pytest.approx(50.0)  # mean active 0.0025 / mean traded 0.5
     assert m["ann_return_0bps"] == pytest.approx((1.02 * 0.99 * 1.03 * 0.98) ** 13 - 1)
     assert m["max_drawdown_0bps"] == pytest.approx(-0.02)  # 1.0401 -> 1.0193
-    assert m["max_dd_days_0bps"] == pytest.approx(252 / 52)  # one period underwater at a time
+    assert m["max_dd_days_0bps"] == pytest.approx(252 / 52)  # one rebalance underwater at a time
     assert m["excess_return_0bps"] == pytest.approx(0.0025 * 52)
     assert m["win_rate_0bps"] == 0.5
     assert m["win_rate_vs_benchmark_0bps"] == 0.5
@@ -103,14 +103,14 @@ def test_summary_known_answers():
 
 
 def test_break_even_cost_zeroes_the_excess_return():
-    p = _periods(GROSS, TRADED, BENCH, [0.0] * 4)
+    p = _rebalances(GROSS, TRADED, BENCH, [0.0] * 4)
     be = backtest.summarize(p, [], per_year=52)["break_even_bps"]
     m = backtest.summarize(p, [be], per_year=52)
     assert m[f"excess_return_{be:g}bps"] == pytest.approx(0, abs=1e-12)
 
 
 def test_yearly_compounds_within_calendar_years():
-    p = _periods(GROSS, [0.0] * 4, [0.0] * 4, [0.0] * 4, start=datetime(2020, 12, 18, 16))
+    p = _rebalances(GROSS, [0.0] * 4, [0.0] * 4, [0.0] * 4, start=datetime(2020, 12, 18, 16))
     y = backtest.yearly(p, 0, per_year=52)
     assert y["year"].to_list() == [2020, 2021]
     assert y["rebalances"].to_list() == [2, 2]

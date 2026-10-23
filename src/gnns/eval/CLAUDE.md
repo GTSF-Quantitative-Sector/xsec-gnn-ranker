@@ -42,13 +42,14 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
 
 ## Backtest decisions
 
-- Terms: a backtest "period" is one rebalance = one snapshot's holding window =
-  `horizon_bars` bars = one label (snapshots are `horizon_bars` apart). Not a fold's
-  train/val/test period. The per-year chart is grouped by rebalance date and shows each
+- Terms: horizon (`horizon_bars`) = a length; rebalance = a snapshot date where the
+  portfolio is set and held one horizon until the next (snapshots are `horizon_bars`
+  apart), so each rebalance's return is one label. "Period" is reserved for a fold's
+  train/val/test periods and the search / held-out periods; the backtest never uses it. The per-year chart is grouped by rebalance date and shows each
   year's count (n): a fold starting in late December gives a one-rebalance stub year
   wherever the boundary is put, so it is shown, not hidden.
 - `backtest.py` (engine, pure functions) and `backtest_run.py` (MLflow I/O, charts).
-  Top-k equal weight, full rebalance each period; turnover = sum |target - drifted| (first
+  Top-k equal weight, fully rebalanced at every rebalance; turnover = sum |target - drifted| (first
   rebalance buys from cash). Linear costs at every level in `cost_bps` (0 = gross);
   metrics keyed `<model>_<metric>_<bps>bps`. Gross return equals `metrics.top_k_returns`
   (tested), which is kept for that reconciliation.
@@ -58,8 +59,8 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
   trading days, comparable across horizons.
 - The run's saved config gives `horizon_bars` and `data.bar`; the current `backtest:`
   block gives the portfolio rules, so old runs can be re-costed. Settings are logged as
-  `backtest.*` tags and `backtest/backtest.yaml`; per-period tables
-  (`backtest/periods_<model>.parquet`) allow hand checks.
+  `backtest.*` tags and `backtest/backtest.yaml`; per-rebalance tables
+  (`backtest/rebalances_<model>.parquet`) allow hand checks.
 - A held name with a null `fwd_return` raises (no fill, no skip, no config key). It
   cannot fire while predictions hold only labeled rows; trailing dates without labels
   must never reach predictions (issue #3).

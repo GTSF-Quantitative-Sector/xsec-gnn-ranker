@@ -1,8 +1,9 @@
 """BacktestEngine: a long-only top-k portfolio simulated from a predictions table.
 
-Never sees models or graphs. One rebalance per prediction date; each period's return is
-one label (open-to-open over `horizon_bars`), so periods are back to back. Weights, trades
-and returns are fractions of the portfolio, so no capital amount is needed.
+Never sees models or graphs. One rebalance per prediction date; the return until the
+next rebalance is one label (open-to-open over `horizon_bars`), so holdings are back to
+back. Weights, trades and returns are fractions of the portfolio, so no capital amount is
+needed.
 """
 
 import math
@@ -28,8 +29,8 @@ def target_weights(pred: pl.DataFrame, top_k: int, weighting: str) -> pl.DataFra
 
 
 def simulate(pred: pl.DataFrame, top_k: int, weighting: str) -> pl.DataFrame:
-    """(timestamp, gross, traded) per rebalance: the period's gross return, and the traded
-    value sum |target - drifted| at its start (the first rebalance buys from cash: 1.0)."""
+    """(timestamp, gross, traded) per rebalance: the gross return until the next one, and
+    the traded value sum |target - drifted| at it (the first rebalance buys from cash: 1.0)."""
     held = target_weights(pred, top_k, weighting).join(
         pred.select(*KEY, "fwd_return"), on=KEY, how="left"
     )
@@ -72,23 +73,23 @@ def _check_held(held: pl.DataFrame) -> None:
 
 
 def net(bps: float) -> pl.Expr:
-    """Per-period return after paying `bps` per side on the traded value."""
+    """Return per rebalance after paying `bps` per side on the traded value."""
     return pl.col("gross") - bps * 1e-4 * pl.col("traded")
 
 
 def drawdown(r: np.ndarray) -> np.ndarray:
-    """Per-period fall of the equity curve below its running peak (start value 1)."""
+    """Fall of the equity curve below its running peak at each rebalance (start value 1)."""
     eq = np.cumprod(1 + r)
     return eq / np.maximum.accumulate(np.maximum(eq, 1.0)) - 1
 
 
-def summarize(periods: pl.DataFrame, cost_bps: list[float], per_year: float) -> dict[str, float]:
-    """Metrics for one model. `periods` is `simulate` joined with per-period `benchmark` and
-    `risk_free` returns; `per_year` is rebalances per year. Cost-dependent keys end in
-    `_<bps>bps`."""
-    traded = float(periods["traded"].to_numpy().mean())
-    bench, rf = periods["benchmark"].to_numpy(), periods["risk_free"].to_numpy()
-    active = float((periods["gross"].to_numpy() - bench).mean())
+def summarize(rebalances: pl.DataFrame, cost_bps: list[float], per_year: float) -> dict[str, float]:
+    """Metrics for one model. `rebalances` is `simulate` joined with each rebalance's
+    `benchmark` and `risk_free` returns; `per_year` is rebalances per year. Cost-dependent
+    keys end in `_<bps>bps`."""
+    traded = float(rebalances["traded"].to_numpy().mean())
+    bench, rf = rebalances["benchmark"].to_numpy(), rebalances["risk_free"].to_numpy()
+    active = float((rebalances["gross"].to_numpy() - bench).mean())
     out = {
         "turnover": traded / 2,  # one-way, per rebalance
         "turnover_annual": traded / 2 * per_year,
@@ -96,7 +97,7 @@ def summarize(periods: pl.DataFrame, cost_bps: list[float], per_year: float) -> 
         "break_even_bps": active / traded * 1e4 if traded else math.nan,
     }
     for bps in cost_bps:
-        r = periods.select(net(bps)).to_series().to_numpy()
+        r = rebalances.select(net(bps)).to_series().to_numpy()
         level = _level(r, bench, rf, per_year) | {"cost_drag": bps * 1e-4 * traded * per_year}
         out |= {f"{k}_{bps:g}bps": v for k, v in level.items()}
     return out
@@ -134,11 +135,11 @@ def _longest_run(mask: np.ndarray) -> int:
     return best
 
 
-def yearly(periods: pl.DataFrame, bps: float, per_year: float) -> pl.DataFrame:
+def yearly(rebalances: pl.DataFrame, bps: float, per_year: float) -> pl.DataFrame:
     """(year, rebalances, net_return, sharpe) per calendar year of the rebalance date."""
     excess = pl.col("r") - pl.col("risk_free")
     return (
-        periods.select(pl.col("timestamp").dt.year().alias("year"), "risk_free", r=net(bps))
+        rebalances.select(pl.col("timestamp").dt.year().alias("year"), "risk_free", r=net(bps))
         .group_by("year")
         .agg(
             rebalances=pl.len(),

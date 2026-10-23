@@ -206,7 +206,7 @@ Needs the `benchmarks` universe built with the `backtest.benchmark` and
 1. Set the `backtest` block in `config/config.yaml`:
 
        backtest:
-         top_k: 3              # names held each period, equal weight
+         top_k: 3              # names held at each rebalance, equal weight
          weighting: equal
          cost_bps: [0, 3, 6]   # per side, on traded value; every level is reported
          benchmark: SPY
@@ -218,10 +218,11 @@ Needs the `benchmarks` universe built with the `backtest.benchmark` and
    current `backtest:` settings, and replaces the run's backtest metrics, `backtest.*`
    tags and `backtest/` artifacts.
 
-A rebalance is one snapshot date: the portfolio is set there and held until the next one,
-`horizon_bars` bars later, so one rebalance = one holding window = one label. "Per
-rebalance" figures and the rows of `periods_<model>.parquet` count these (unrelated to
-the train / validation / test periods of a fold).
+Terms: the horizon (`horizon_bars`) is a length; a rebalance is one snapshot date where
+the portfolio is set, then held for one horizon until the next rebalance, so each
+rebalance's return is one label. "Per rebalance" figures and the rows of
+`rebalances_<model>.parquet` count these. "Period" is kept for a fold's train /
+validation / test periods (and the search and held-out periods).
 
 At each rebalance the portfolio holds the `top_k`
 highest scores at equal weight, entering at the next bar's open like the labels, and
@@ -234,7 +235,7 @@ trading days), `excess_return`, `tracking_error`, `ir` (vs the benchmark), `win_
 `turnover_annual`, `break_even_bps` (the cost at which the portfolio stops beating the
 benchmark). Artifacts in `backtest/`: equity, drawdown and per-year charts (each year's
 tick shows its rebalance count n, so partial years stand out), a per-rebalance table per
-model (`periods_<model>.parquet`) and `backtest.yaml`. A held name without a
+model (`rebalances_<model>.parquet`) and `backtest.yaml`. A held name without a
 forward return stops the backtest with an error.
 
 If you shrink `cost_bps`, metrics for levels you removed stay on the run from the earlier

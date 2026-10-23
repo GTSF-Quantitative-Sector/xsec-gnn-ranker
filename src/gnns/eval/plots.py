@@ -28,7 +28,7 @@ def ic_over_time(ics: dict[str, pl.DataFrame], rolling: int, path: Path) -> None
             ic["timestamp"], ic["ic"].rolling_mean(rolling), label=f"{label} {rolling}-date mean"
         )
     ax.axhline(0, color="black", lw=0.8)
-    ax.set(title="Rank IC over time (test periods)", ylabel="Spearman IC")
+    ax.set(title="Rank IC over time (test rebalances)", ylabel="Spearman IC")
     ax.legend()
     _save(fig, path)
 
@@ -75,7 +75,7 @@ def quantile_cascade(qrets: dict[str, pl.DataFrame], path: Path) -> None:
     ax.set(
         title="Quantile cascade",
         xlabel="score quantile (1 = top)",
-        ylabel="mean forward return per period (%)",
+        ylabel="mean forward return per rebalance (%)",
     )
     ax.legend()
     _save(fig, path)
@@ -182,11 +182,11 @@ def training_curves(histories: dict[str, list[list[dict]]], path: Path) -> None:
 
 
 def backtest_equity(
-    periods: dict[str, pl.DataFrame], cost_bps: list[float], benchmark: str, path: Path
+    rebalances: dict[str, pl.DataFrame], cost_bps: list[float], benchmark: str, path: Path
 ) -> None:
     """Growth of $1 per model: top-k net of each cost level, equal-weight universe, benchmark."""
-    fig, axes = plt.subplots(len(periods), 1, figsize=(11, 3.5 * len(periods)), squeeze=False)
-    for ax, (label, p) in zip(axes[:, 0], periods.items(), strict=True):
+    fig, axes = plt.subplots(len(rebalances), 1, figsize=(11, 3.5 * len(rebalances)), squeeze=False)
+    for ax, (label, p) in zip(axes[:, 0], rebalances.items(), strict=True):
         t = p["timestamp"]
         for bps in cost_bps:
             ax.plot(t, (1 + p.select(net(bps)).to_series()).cum_prod(), label=f"top-k, {bps:g} bps")
@@ -197,10 +197,12 @@ def backtest_equity(
     _save(fig, path)
 
 
-def backtest_drawdown(periods: dict[str, pl.DataFrame], cost_bps: list[float], path: Path) -> None:
+def backtest_drawdown(
+    rebalances: dict[str, pl.DataFrame], cost_bps: list[float], path: Path
+) -> None:
     """How far each model's portfolio sits below its running peak, per cost level."""
-    fig, axes = plt.subplots(len(periods), 1, figsize=(11, 3 * len(periods)), squeeze=False)
-    for ax, (label, p) in zip(axes[:, 0], periods.items(), strict=True):
+    fig, axes = plt.subplots(len(rebalances), 1, figsize=(11, 3 * len(rebalances)), squeeze=False)
+    for ax, (label, p) in zip(axes[:, 0], rebalances.items(), strict=True):
         for bps in cost_bps:
             r = p.select(net(bps)).to_series().to_numpy()
             ax.plot(p["timestamp"], drawdown(r) * 100, label=f"{bps:g} bps")
