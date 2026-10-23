@@ -209,9 +209,11 @@ def backtest_drawdown(periods: dict[str, pl.DataFrame], cost_bps: list[float], p
     _save(fig, path)
 
 
-def backtest_per_year(years: dict[str, pl.DataFrame], path: Path) -> None:
+def backtest_per_year(years: dict[str, pl.DataFrame], held: str, path: Path) -> None:
     """Net return and Sharpe per calendar year for each model and cost level: is the result
-    consistent across years, or carried by a few?"""
+    consistent across years, or carried by a few? Ticks show each year's rebalance count
+    (n), so partial years (e.g. a fold starting in late December) are visible; `held`
+    says how long one rebalance is held."""
     fig, (top, bottom) = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
     width = 0.8 / len(years)
     for i, (name, y) in enumerate(years.items()):
@@ -220,8 +222,10 @@ def backtest_per_year(years: dict[str, pl.DataFrame], path: Path) -> None:
         bottom.bar(x, y["sharpe"], width=width, label=name)
     for ax in (top, bottom):
         ax.axhline(0, color="black", lw=0.8)
-    bottom.set_xticks(next(iter(years.values()))["year"].to_list())
+    first = next(iter(years.values()))
+    ticks = [f"{y}\nn={n}" for y, n in first.select("year", "rebalances").iter_rows()]
+    bottom.set_xticks(first["year"].to_list(), ticks)
     top.set(title="Backtest by calendar year", ylabel="net return (%)")
-    bottom.set(xlabel="year (rebalance date)", ylabel="Sharpe")
+    bottom.set(xlabel=f"year of rebalance date (n = rebalances that year, {held})", ylabel="Sharpe")
     top.legend(fontsize=8, ncol=3)
     _save(fig, path)

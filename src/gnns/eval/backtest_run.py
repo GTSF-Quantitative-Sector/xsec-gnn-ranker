@@ -36,10 +36,10 @@ def backtest(run_id: str, cfg: dict) -> dict[str, float]:
         files = sorted(src.glob("predictions_*.parquet"))
         preds = {f.stem.removeprefix("predictions_"): pl.read_parquet(f) for f in files}
         refs = reference_returns(run_cfg, settings, cfg["data_root"])
-        per_year = metrics.bars_per_year(run_cfg["data"]["bar"]) / run_cfg["horizon_bars"]
         out = Path(tmp) / "out"
         out.mkdir()
-        results = run_backtest(preds, refs, settings, per_year, out)
+        h, bar = run_cfg["horizon_bars"], run_cfg["data"]["bar"]
+        results = run_backtest(preds, refs, settings, h, bar, out)
         (out / "backtest.yaml").write_text(yaml.safe_dump(settings, sort_keys=False))
         with mlflow.start_run(run_id=run_id):
             mlflow.log_metrics(results)
@@ -52,11 +52,13 @@ def run_backtest(
     preds: dict[str, pl.DataFrame],
     refs: pl.DataFrame,
     settings: dict,
-    per_year: float,
+    horizon_bars: int,
+    bar: str,
     out: Path,
 ) -> dict[str, float]:
-    """Simulate each model, write per-period tables and charts to `out`, and return
-    metrics keyed `<model>_<metric>`."""
+    """Simulate each model, write per-rebalance tables and charts to `out`, and return
+    metrics keyed `<model>_<metric>`. One rebalance every `horizon_bars` bars of `bar`."""
+    per_year = metrics.bars_per_year(bar) / horizon_bars  # rebalances per year
     universe = metrics.universe_returns(next(iter(preds.values()))).rename({"ret": "universe"})
     periods, results = {}, {}
     for label, pred in preds.items():
@@ -85,7 +87,8 @@ def run_backtest(
         periods, settings["cost_bps"], settings["benchmark"], out / "1_equity.png"
     )
     plots.backtest_drawdown(periods, settings["cost_bps"], out / "2_drawdown.png")
-    plots.backtest_per_year(years, out / "3_per_year.png")
+    held = f"each held {horizon_bars} bars of {bar}"
+    plots.backtest_per_year(years, held, out / "3_per_year.png")
     return results
 
 

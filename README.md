@@ -160,7 +160,12 @@ Needs the `benchmarks` universe built with the `backtest.benchmark` and
    current `backtest:` settings, and replaces the run's backtest metrics, `backtest.*`
    tags and `backtest/` artifacts.
 
-At each rebalance (every `horizon_bars`, one per snapshot) the portfolio holds the `top_k`
+A rebalance is one snapshot date: the portfolio is set there and held until the next one,
+`horizon_bars` bars later, so one rebalance = one holding window = one label. "Per
+rebalance" figures and the rows of `periods_<model>.parquet` count these (unrelated to
+the train / validation / test periods of a fold).
+
+At each rebalance the portfolio holds the `top_k`
 highest scores at equal weight, entering at the next bar's open like the labels, and
 trades back to those weights (turnover = sum of |target - drifted weight|; the first
 rebalance buys from cash), paying `cost_bps` per side on the traded value. Metrics per
@@ -169,8 +174,9 @@ risk-free return), `max_drawdown`, `max_dd_days` (longest time below a previous 
 trading days), `excess_return`, `tracking_error`, `ir` (vs the benchmark), `win_rate`,
 `win_rate_vs_benchmark`, `cost_drag`; per model: `turnover` (one-way, per rebalance),
 `turnover_annual`, `break_even_bps` (the cost at which the portfolio stops beating the
-benchmark). Artifacts in `backtest/`: equity, drawdown and per-year charts, a per-period
-table per model (`periods_<model>.parquet`) and `backtest.yaml`. A held name without a
+benchmark). Artifacts in `backtest/`: equity, drawdown and per-year charts (each year's
+tick shows its rebalance count n, so partial years stand out), a per-rebalance table per
+model (`periods_<model>.parquet`) and `backtest.yaml`. A held name without a
 forward return stops the backtest with an error.
 
 If you shrink `cost_bps`, metrics for levels you removed stay on the run from the earlier
