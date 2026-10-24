@@ -40,6 +40,12 @@ GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --ch
 `pyright` and `pytest` on Ubuntu for every push to `main` and every pull request, in an
 env built from `environment.yml`. Results are on the repo's Actions tab and on each pull
 request. Run the same four commands locally before pushing.
+On pull requests a second job, `issues`, runs the issue check below.
+
+Merge pull requests with **Merge when ready** (the merge queue). GitHub then reruns both
+jobs on the latest `main` plus the PR and merges only if they pass, so the issue check
+sees the issues as they are at merge time, not as they were at the PR's last push. A
+merge takes a few minutes.
 
 ### Issue check
 

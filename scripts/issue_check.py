@@ -205,24 +205,33 @@ def findings(issues: dict[int, Issue], n: int, closes: set[int] | None) -> list[
     return list(dict.fromkeys(out))
 
 
-def check(ci: bool) -> None:
+def current_branch() -> str:
+    """The branch being checked; in the merge queue, the queued PR's branch."""
     branch = (
-        os.environ.get("GITHUB_HEAD_REF")
+        os.environ.get("GITHUB_HEAD_REF")  # pull request
+        or os.environ.get("GITHUB_REF_NAME")  # merge queue: gh-readonly-queue/main/pr-<N>-<sha>
         or subprocess.run(
             ["git", "branch", "--show-current"], capture_output=True, encoding="utf-8"
         ).stdout.strip()
     )
-    if branch.startswith(RESEARCH):
-        print(f"{branch}: research branch, issue check skipped")
-        return
-    if not (m := re.match(r"(\d+)-", branch)):
-        msg = f"branch {branch or '(detached)'} has no issue number"
-        if ci:
-            sys.exit(f"{msg}: PRs come from a <N>-<slug> branch for an open issue")
-        print(f"{msg}; issue check skipped")
-        return
-    n = int(m[1])
+    if m := re.match(r"gh-readonly-queue/.+/pr-(\d+)-", branch):
+        branch = gh("pr", "view", m[1], "--json", "headRefName", "-q", ".headRefName")
+    return branch
+
+
+def check(ci: bool) -> None:
     try:
+        branch = current_branch()
+        if branch.startswith(RESEARCH):
+            print(f"{branch}: research branch, issue check skipped")
+            return
+        if not (m := re.match(r"(\d+)-", branch)):
+            msg = f"branch {branch or '(detached)'} has no issue number"
+            if ci:
+                sys.exit(f"{msg}: PRs come from a <N>-<slug> branch for an open issue")
+            print(f"{msg}; issue check skipped")
+            return
+        n = int(m[1])
         issues, closes = fetch(branch)
     except (OSError, subprocess.CalledProcessError) as e:
         msg = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)

@@ -1,5 +1,6 @@
+import issue_check
 import pytest
-from issue_check import SECTIONS, check, findings
+from issue_check import SECTIONS, check, current_branch, findings
 
 RESOLUTION = "## Resolution\n" + "".join(f"### {s}\ntext\n" for s in SECTIONS)
 
@@ -134,3 +135,11 @@ def test_branches_without_an_issue_number(monkeypatch, capsys):
     assert "has no issue number; issue check skipped" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="<N>-<slug>"):
         check(ci=True)
+
+
+def test_merge_queue_checks_the_queued_prs_branch(monkeypatch):
+    monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
+    monkeypatch.setenv("GITHUB_REF_NAME", "gh-readonly-queue/main/pr-12-0a1b2c")
+    prs = {"12": "2-backtester"}
+    monkeypatch.setattr(issue_check, "gh", lambda *args: prs[args[2]])
+    assert current_branch() == "2-backtester"
