@@ -55,6 +55,10 @@ on issue #N) and lists what still blocks its pull request. It needs `gh`, logged
 
     python scripts/issue_check.py check        # what still blocks this branch's PR
     python scripts/issue_check.py check --ci   # same, but exit 1 if anything does (CI)
+    python scripts/issue_check.py session      # the issue, its handoffs and blockers, the check
+
+Claude Code runs `session` at the start of every session (`.claude/settings.json`), so each
+agent starts with its workstream's issue, open handoffs and blockers in context.
 
 ### Working on several branches at once (slots)
 

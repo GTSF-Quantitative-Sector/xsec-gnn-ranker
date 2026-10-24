@@ -1,6 +1,6 @@
 import issue_check
 import pytest
-from issue_check import SECTIONS, check, current_branch, findings
+from issue_check import SECTIONS, check, context, current_branch, findings
 
 RESOLUTION = "## Resolution\n" + "".join(f"### {s}\ntext\n" for s in SECTIONS)
 
@@ -10,6 +10,7 @@ def issue(
 ):
     return {
         "number": n,
+        "title": f"title {n}",
         "open": open,
         "body": body,
         "labels": list(labels),
@@ -143,3 +144,35 @@ def test_merge_queue_checks_the_queued_prs_branch(monkeypatch):
     prs = {"12": "2-backtester"}
     monkeypatch.setattr(issue_check, "gh", lambda *args: prs[args[2]])
     assert current_branch() == "2-backtester"
+
+
+def test_session_context_shows_handoffs_in_full_and_blocker_resolutions():
+    issues = repo(
+        issue(1, body="- [ ] build it", subs=[3, 8], blocked_by=[6]),
+        issue(3, parent=1, body="## Need\ndelisting returns"),
+        issue(8, parent=1, open=False),
+        issue(6, labels=["infra"], open=False, comments=["## Resolution\n### Where\nx.py"]),
+        issue(2, labels=["backtest"], blocked_by=[3]),
+    )
+    assert context(issues, 1).splitlines() == [
+        "Workstream #1: title 1",
+        "",
+        "- [ ] build it",
+        "",
+        "Open sub-issues (handoffs you own):",
+        "--- #3: title 3",
+        "## Need",
+        "delisting returns",
+        "",
+        "Blockers:",
+        "  #6 (closed) title 6",
+        "## Resolution",
+        "### Where",
+        "x.py",
+    ]
+    assert context(issues, 2).splitlines()[-4:] == [
+        "Open sub-issues (handoffs you own): none",
+        "Blockers:",
+        "  #3 (open) title 3",
+        '     Finish independent work, then stop and report "blocked on #3".',
+    ]

@@ -2,10 +2,12 @@
 
 Branch <N>-<slug> works on issue #N. `check` lists what still blocks its PR: unticked steps,
 open blockers, sub-issues (handoffs) without a complete Resolution comment or not closed by
-the PR, dependencies against pipeline order, and cycles. Stdlib plus the `gh` CLI.
+the PR, dependencies against pipeline order, and cycles. `session` prints the context a new
+session starts with (the SessionStart hook). Stdlib plus the `gh` CLI.
 
     python scripts/issue_check.py check        # print findings, exit 0
     python scripts/issue_check.py check --ci   # exit 1 on any finding
+    python scripts/issue_check.py session      # issue, handoffs, blockers, findings
 """
 
 import argparse
@@ -34,7 +36,7 @@ query($owner: String!, $name: String!, $branch: String!) {
         body
         comments(last: 50) { nodes { body } }
         parent { number }
-        blockedBy(first: 20) { nodes { ...Ref } }
+        blockedBy(first: 20) { nodes { ...Ref comments(last: 50) { nodes { body } } } }
         subIssues(first: 20) { nodes { ...Ref comments(last: 50) { nodes { body } } } }
       }
     }
@@ -43,7 +45,7 @@ query($owner: String!, $name: String!, $branch: String!) {
     }
   }
 }
-fragment Ref on Issue { number state labels(first: 10) { nodes { name } } }
+fragment Ref on Issue { number title state labels(first: 10) { nodes { name } } }
 """
 
 
@@ -70,6 +72,7 @@ def fetch(branch: str) -> tuple[dict[int, Issue], set[int] | None]:
             node["number"],
             {
                 "number": node["number"],
+                "title": node["title"],
                 "open": node["state"] == "OPEN",
                 "labels": [lab["name"] for lab in node["labels"]["nodes"]],
                 "body": "",
@@ -105,14 +108,19 @@ def unticked(body: str) -> list[str]:
     return re.findall(r"^\s*[-*] \[ \] (.+)$", body, re.MULTILINE)
 
 
+def resolution(issue: Issue) -> str | None:
+    """The issue's latest comment that starts with '## Resolution'."""
+    found = [c for c in issue["comments"] if c.strip().lower().startswith("## resolution")]
+    return found[-1].strip() if found else None
+
+
 def resolution_problem(issue: Issue) -> str | None:
     """None if the issue's latest Resolution comment has every section filled in."""
-    found = [c for c in issue["comments"] if c.strip().lower().startswith("## resolution")]
-    if not found:
+    if not (text := resolution(issue)):
         return "no '## Resolution' comment"
     filled: dict[str, bool] = {}
     section = None
-    for line in found[-1].strip().splitlines()[1:]:
+    for line in text.splitlines()[1:]:
         if line.strip().startswith("### "):
             section = line.strip()[4:].strip().lower()
             filled[section] = False
@@ -219,26 +227,58 @@ def current_branch() -> str:
     return branch
 
 
-def check(ci: bool) -> None:
+def context(issues: dict[int, Issue], n: int) -> str:
+    """What a session on workstream n starts with: the issue, the open handoffs it owns
+    (in full), and its blockers (the Resolution of each closed one)."""
+    me = issues[n]
+    out = [f"Workstream #{n}: {me['title']}", "", me["body"].strip(), ""]
+    subs = [s for s in me["sub_issues"] if issues[s]["open"]]
+    out.append("Open sub-issues (handoffs you own):" + ("" if subs else " none"))
+    for s in subs:
+        out += [f"--- #{s}: {issues[s]['title']}", issues[s]["body"].strip(), ""]
+    work = [n, *me["sub_issues"]]
+    blockers = list(dict.fromkeys(b for i in work for b in issues[i]["blocked_by"]))
+    out.append("Blockers:" + ("" if blockers else " none"))
+    for b in blockers:
+        if issues[b]["open"]:
+            out += [
+                f"  #{b} (open) {issues[b]['title']}",
+                f'     Finish independent work, then stop and report "blocked on #{b}".',
+            ]
+        else:
+            text = resolution(issues[b]) or "(no Resolution comment)"
+            out += [f"  #{b} (closed) {issues[b]['title']}", text, ""]
+    return "\n".join(out)
+
+
+def load(ci: bool) -> tuple[int, dict[int, Issue], set[int] | None] | None:
+    """The branch's issue number and the issues, or None after saying why there are none."""
     try:
         branch = current_branch()
         if branch.startswith(RESEARCH):
             print(f"{branch}: research branch, issue check skipped")
-            return
+            return None
         if not (m := re.match(r"(\d+)-", branch)):
             msg = f"branch {branch or '(detached)'} has no issue number"
             if ci:
                 sys.exit(f"{msg}: PRs come from a <N>-<slug> branch for an open issue")
             print(f"{msg}; issue check skipped")
-            return
-        n = int(m[1])
-        issues, closes = fetch(branch)
+            return None
+        return int(m[1]), *fetch(branch)
     except (OSError, subprocess.CalledProcessError) as e:
         msg = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
         if ci:
             sys.exit(f"issue check failed: {msg}")
         print(f"issue check skipped: {msg}")
+        return None
+
+
+def check(ci: bool, session: bool = False) -> None:
+    if not (loaded := load(ci)):
         return
+    n, issues, closes = loaded
+    if session and n in issues:
+        print(context(issues, n) + "\n")
     out = findings(issues, n, closes)
     print(f"issue check for #{n}: " + (f"{len(out)} to resolve before the PR" if out else "ok"))
     for f in out:
@@ -254,8 +294,9 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check", help="what still blocks this branch's PR")
     c.add_argument("--ci", action="store_true", help="exit 1 on any finding")
+    sub.add_parser("session", help="context for a new session (SessionStart hook)")
     args = parser.parse_args()
-    check(args.ci)
+    check(ci=getattr(args, "ci", False), session=args.cmd == "session")
 
 
 if __name__ == "__main__":
