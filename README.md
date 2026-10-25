@@ -1,7 +1,8 @@
 # xsec-gnn-ranker
 
 Cross-sectional GNN stock ranker (GTSF Quant Sector). Research plan:
-[docs/project_overview.md](docs/project_overview.md). Current status: [docs/PLAN.md](docs/PLAN.md).
+[docs/project_overview.md](docs/project_overview.md) (✓ marks finished steps). In progress
+and next: the repo's [Issues](https://github.com/GTSF-Quantitative-Sector/xsec-gnn-ranker/issues).
 
 ## Setup
 
@@ -13,6 +14,9 @@ After pulling a change to `environment.yml`, run `conda env update -f environmen
 Once per clone, turn on the repo's git hooks (worktrees and slots share the setting):
 
     git config core.hooksPath .githooks
+
+Install the GitHub CLI ([cli.github.com](https://cli.github.com)) and log in once:
+`gh auth login`. The issue check, its hooks and `slot.py sync` use it.
 
 Always run the pipeline from an activated `gnns` env: torch, cuDNN and MKL find their
 libraries through the env's `PATH`. `conda` installs the CUDA build of pytorch when it finds
@@ -50,6 +54,21 @@ Merge pull requests with **Merge when ready** (the merge queue). GitHub then rer
 jobs on the latest `main` plus the PR and merges only if they pass, so the issue check
 sees the issues as they are at merge time, not as they were at the PR's last push. A
 merge takes a few minutes.
+
+### Workflow
+
+GitHub Issues are the to-do list, and agents follow the rules in `CLAUDE.md` ("Workflow").
+
+1. **Start:** open an issue with an area label (infra, data, graphs, train, eval,
+   backtest) and a Goal, Done when and Steps checklist, then
+   `python scripts/slot.py start <slot> <N>-<slug>` and start a session there.
+2. **Work:** the agent ticks steps as it goes. When it needs another workstream's work,
+   it opens a sub-issue there, marks its own issue blocked, and stops once only blocked
+   work is left.
+3. **Finish:** the agent pushes the branch and opens a PR saying `Closes #<N>` (plus
+   `Closes #<sub-issue>` for each handoff it resolved). CI runs `check` and `issues`.
+4. **Merge:** **Merge when ready** (below), then `python scripts/slot.py sync`, and resume
+   the threads it lists as "resume".
 
 ### Issue check
 
