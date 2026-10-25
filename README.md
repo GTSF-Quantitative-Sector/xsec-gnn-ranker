@@ -10,6 +10,10 @@ Cross-sectional GNN stock ranker (GTSF Quant Sector). Research plan:
 
 After pulling a change to `environment.yml`, run `conda env update -f environment.yml --prune`.
 
+Once per clone, turn on the repo's git hooks (worktrees and slots share the setting):
+
+    git config core.hooksPath .githooks
+
 Always run the pipeline from an activated `gnns` env: torch, cuDNN and MKL find their
 libraries through the env's `PATH`. `conda` installs the CUDA build of pytorch when it finds
 an NVIDIA driver, and the CPU build otherwise.
@@ -59,6 +63,8 @@ on issue #N) and lists what still blocks its pull request. It needs `gh`, logged
 
 Claude Code runs `session` at the start of every session (`.claude/settings.json`), so each
 agent starts with its workstream's issue, open handoffs and blockers in context.
+After each commit, the `post-commit` git hook runs `check` and prints its findings (it never
+blocks the commit).
 
 ### Working on several branches at once (slots)
 
