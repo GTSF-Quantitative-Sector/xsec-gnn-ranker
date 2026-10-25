@@ -77,6 +77,7 @@ MLflow runs stay per slot. From the home repo, with conda available:
     python scripts/slot.py setup 1 2 3          # once: worktree + env clone (~2 min each)
     python scripts/slot.py start 1 backtester   # branch from local main (seconds)
     python scripts/slot.py list                 # slots, branches, uncommitted work
+    python scripts/slot.py sync                 # after a merge: update main, free slots
     python scripts/slot.py remove 1             # delete a slot's worktree and env
 
 `start` refuses if the slot has uncommitted work, reuses the branch if it already exists,
@@ -85,6 +86,12 @@ repo first. Then start the session from a prompt with the slot's env active (`co
 activate gnns-slot1`, `cd` into the slot, `claude`); if you use VS Code, close it first so
 the new window picks up the slot's env. Finish a task by pushing its branch and opening a
 pull request.
+
+After merging a pull request, run `sync` (needs `gh`). It pulls `main` in the home repo,
+deletes each branch whose PR merged and detaches its slot at `main` (it keeps a branch with
+commits after its PR, or a slot with uncommitted changes), then lists each slot's thread:
+blocked on an open issue, resume (a blocker's fix is on `main` but not yet in the branch:
+rebase, then read the blocker's Resolution), or working.
 
 ## Usage
 
