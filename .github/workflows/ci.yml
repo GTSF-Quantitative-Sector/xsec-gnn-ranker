@@ -1,4 +1,4 @@
-# Lint, type-check and test on every push to main and every pull request.
+# Lint, type-check and test on every push to main, pull request and merge-queue entry.
 # No data, API key or GPU needed: tests use temporary folders and synthetic data,
 # and conda installs the CPU build of pytorch on the runner.
 name: CI
@@ -7,6 +7,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:  # the merge queue reruns both jobs on main + the PR before merging
 
 jobs:
   check:
@@ -37,3 +38,15 @@ jobs:
       - run: ruff format --check
       - run: pyright
       - run: pytest
+
+  issues:  # what still blocks the PR's workstream; see scripts/issue_check.py
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 scripts/issue_check.py check --ci
+        env:
+          GH_TOKEN: ${{ github.token }}

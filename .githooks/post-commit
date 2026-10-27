@@ -1,0 +1,3 @@
+#!/bin/sh
+# After each commit: what still blocks this branch's PR (prints only, never fails).
+python scripts/issue_check.py check || true

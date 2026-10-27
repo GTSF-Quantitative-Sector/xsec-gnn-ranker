@@ -1,7 +1,8 @@
 # xsec-gnn-ranker
 
 Cross-sectional GNN stock ranker (GTSF Quant Sector). Research plan:
-[docs/project_overview.md](docs/project_overview.md). Current status: [docs/PLAN.md](docs/PLAN.md).
+[docs/project_overview.md](docs/project_overview.md) (✓ marks finished steps). In progress
+and next: the repo's [Issues](https://github.com/GTSF-Quantitative-Sector/xsec-gnn-ranker/issues).
 
 ## Setup
 
@@ -9,6 +10,13 @@ Cross-sectional GNN stock ranker (GTSF Quant Sector). Research plan:
     conda activate gnns
 
 After pulling a change to `environment.yml`, run `conda env update -f environment.yml --prune`.
+
+Once per clone, turn on the repo's git hooks (worktrees and slots share the setting):
+
+    git config core.hooksPath .githooks
+
+Install the GitHub CLI ([cli.github.com](https://cli.github.com)) and log in once:
+`gh auth login`. The issue check, its hooks and `slot.py sync` use it.
 
 Always run the pipeline from an activated `gnns` env: torch, cuDNN and MKL find their
 libraries through the env's `PATH`. `conda` installs the CUDA build of pytorch when it finds
@@ -40,6 +48,42 @@ GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --ch
 `pyright` and `pytest` on Ubuntu for every push to `main` and every pull request, in an
 env built from `environment.yml`. Results are on the repo's Actions tab and on each pull
 request. Run the same four commands locally before pushing.
+On pull requests a second job, `issues`, runs the issue check below.
+
+Merge pull requests with **Merge when ready** (the merge queue). GitHub then reruns both
+jobs on the latest `main` plus the PR and merges only if they pass, so the issue check
+sees the issues as they are at merge time, not as they were at the PR's last push. A
+merge takes a few minutes.
+
+### Workflow
+
+GitHub Issues are the to-do list, and agents follow the rules in `CLAUDE.md` ("Workflow").
+
+1. **Start:** open an issue with an area label (infra, data, graphs, train, eval,
+   backtest) and a Goal, Done when and Steps checklist, then
+   `python scripts/slot.py start <slot> <N>-<slug>` and start a session there.
+2. **Work:** the agent ticks steps as it goes. When it needs another workstream's work,
+   it opens a sub-issue there, marks its own issue blocked, and stops once only blocked
+   work is left.
+3. **Finish:** the agent pushes the branch and opens a PR saying `Closes #<N>` (plus
+   `Closes #<sub-issue>` for each handoff it resolved). CI runs `check` and `issues`.
+4. **Merge:** **Merge when ready** (below), then `python scripts/slot.py sync`, and resume
+   the threads it lists as "resume".
+
+### Issue check
+
+`scripts/issue_check.py` checks the GitHub issue of the current branch (`<N>-<slug>` works
+on issue #N) and lists what still blocks its pull request. It needs `gh`, logged in
+(`gh auth login`).
+
+    python scripts/issue_check.py check        # what still blocks this branch's PR
+    python scripts/issue_check.py check --ci   # same, but exit 1 if anything does (CI)
+    python scripts/issue_check.py session      # the issue, its handoffs and blockers, the check
+
+Claude Code runs `session` at the start of every session (`.claude/settings.json`), so each
+agent starts with its workstream's issue, open handoffs and blockers in context.
+After each commit, the `post-commit` git hook runs `check` and prints its findings (it never
+blocks the commit).
 
 ### Working on several branches at once (slots)
 
@@ -52,6 +96,7 @@ MLflow runs stay per slot. From the home repo, with conda available:
     python scripts/slot.py setup 1 2 3          # once: worktree + env clone (~2 min each)
     python scripts/slot.py start 1 backtester   # branch from local main (seconds)
     python scripts/slot.py list                 # slots, branches, uncommitted work
+    python scripts/slot.py sync                 # after a merge: update main, free slots
     python scripts/slot.py remove 1             # delete a slot's worktree and env
 
 `start` refuses if the slot has uncommitted work, reuses the branch if it already exists,
@@ -60,6 +105,12 @@ repo first. Then start the session from a prompt with the slot's env active (`co
 activate gnns-slot1`, `cd` into the slot, `claude`); if you use VS Code, close it first so
 the new window picks up the slot's env. Finish a task by pushing its branch and opening a
 pull request.
+
+After merging a pull request, run `sync` (needs `gh`). It pulls `main` in the home repo,
+deletes each branch whose PR merged and detaches its slot at `main` (it keeps a branch with
+commits after its PR, or a slot with uncommitted changes), then lists each slot's thread:
+blocked on an open issue, resume (a blocker's fix is on `main` but not yet in the branch:
+rebase, then read the blocker's Resolution), or working.
 
 ## Usage
 
