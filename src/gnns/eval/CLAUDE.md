@@ -25,6 +25,14 @@ weights, costs, tearsheet). Backtest is built last, once real model outputs exis
 - Charts are on demand: `gnns report <run_id>` (`report.py`) downloads that run's
   artifacts, calls `make_charts`, and logs the PNGs to the same run. It uses the run's
   own saved config, so charts match the settings the run was trained with.
+- Permutation importance (`importance.py`) is computed inside `gnns train`, per fold on
+  validation dates, while the trained model is in memory (weights are not saved).
+  Scrambles stay within each date and node type; "edges" rewires who links to whom.
+  Logged as `<model>_imp_<input>` and `importance.json`. Validation dates also chose the
+  kept epoch, so like `val_ic` it is somewhat optimistic; it shows reliance, while the
+  future ablation (`docs/PLAN.md`) decides what to keep.
+- `gnns report` also computes the feature correlation chart from the price data (search
+  period only, within-date rank correlation of the construction's `features.list`).
 - The predictions table is the hand-off to the BacktestEngine (step 10), which will read
   it the same way and never touch models or graphs.
 

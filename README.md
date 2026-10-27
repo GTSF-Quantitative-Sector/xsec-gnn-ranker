@@ -64,6 +64,33 @@ Per-machine settings go in `config/machine.yaml` (gitignored, optional):
 
     data_root: data   # where datasets are written (default: data/)
 
+### CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`,
+`pyright` and `pytest` on Ubuntu for every push to `main` and every pull request, in an
+env built from `environment.yml`. Results are on the repo's Actions tab and on each pull
+request. Run the same four commands locally before pushing.
+
+### Working on several branches at once (slots)
+
+The repo folder (home) stays on `main`. Parallel tasks run in **slots**: reusable git
+worktrees next to it (`<repo>-slot1`, `-slot2`, …), each with its own conda env
+(`gnns-slot1`, …) and the package installed from that folder, so a slot always runs its
+own code. Slots share the home repo's `data/` (via their `machine.yaml`) and copy its `.env`.
+MLflow runs stay per slot. From the home repo, with conda available:
+
+    python scripts/slot.py setup 1 2 3          # once: worktree + env clone (~2 min each)
+    python scripts/slot.py start 1 backtester   # branch from local main (seconds)
+    python scripts/slot.py list                 # slots, branches, uncommitted work
+    python scripts/slot.py remove 1             # delete a slot's worktree and env
+
+`start` refuses if the slot has uncommitted work, reuses the branch if it already exists,
+and updates the slot's env only when `environment.yml` changed. Pull `main` in the home
+repo first. Then start the session from a prompt with the slot's env active (`conda
+activate gnns-slot1`, `cd` into the slot, `claude`); if you use VS Code, close it first so
+the new window picks up the slot's env. Finish a task by pushing its branch and opening a
+pull request.
+
 ## Usage
 
 Every stage runs through the `gnns` command and reads `config/config.yaml`. To change what a
@@ -145,4 +172,6 @@ Needs the construction's universe and the `benchmarks` universe built (`gnns bui
    run's saved predictions (no retraining, a few seconds) and attaches them to the run:
    rank IC over time, cumulative IC, IC by fold (model vs baseline), quantile cascade,
    quantile equity curves, top-k equity curves vs equal-weight and the benchmark (no
-   costs; the full backtest is a later step), and per-fold training curves.
+   costs; the full backtest is a later step), score spread, permutation importance per
+   input and for edges (`eval.permutation_repeats`), per-fold training curves with the
+   no-information loss line, and the feature correlation matrix (search period).

@@ -43,6 +43,19 @@ def test_bars_per_year(bar, expected):
     assert metrics.bars_per_year(bar) == pytest.approx(expected)
 
 
+def test_cross_sectional_corr():
+    f = pl.DataFrame(
+        {
+            "timestamp": [T1] * 4 + [T2] * 4,
+            "a": [1.0, 2.0, 3.0, 4.0] * 2,
+            "b": [2.0, 4.0, 6.0, 9.0] * 2,  # same order as a
+            "c": [4.0, 3.0, 2.0, 1.0] * 2,  # reversed
+        }
+    )
+    m = metrics.cross_sectional_corr(f, ["a", "b", "c"])
+    assert m.ravel().tolist() == pytest.approx([1, 1, -1, 1, 1, -1, -1, -1, 1])
+
+
 def test_quantiles_top_k_and_universe():
     p = _pred()
     q = metrics.quantile_returns(p, 2).filter(pl.col("timestamp") == T1)

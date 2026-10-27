@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch_geometric.data import Batch, Data
 
-from gnns.train.losses import listmle
+from gnns.train.losses import listmle, listmle_no_info, no_info_loss
 from gnns.train.models import MODELS, build_model
 
 
@@ -33,6 +33,18 @@ def test_listmle_matches_hand_calculation_and_prefers_correct_order():
     )
     assert listmle(s, y, mask, batch).item() == pytest.approx(expected)
     assert listmle(s, y, mask, batch) < listmle(s.flip(0), y, mask, batch)
+
+
+def test_no_info_loss_is_listmle_at_equal_scores():
+    for n in (2, 9, 11):
+        y, mask = torch.randn(n), torch.ones(n, dtype=torch.bool)
+        equal = listmle(torch.zeros(n), y, mask, torch.zeros(n, dtype=torch.long))
+        assert equal.item() == pytest.approx(listmle_no_info(n))
+    assert listmle_no_info(9) == pytest.approx(1.4225, abs=1e-4)
+    samples = [_sample(9), _sample(11)]
+    assert no_info_loss("listmle", samples) == pytest.approx(
+        (listmle_no_info(9) + listmle_no_info(11)) / 2
+    )
 
 
 def test_listmle_ignores_masked_nodes_and_keeps_snapshots_separate():

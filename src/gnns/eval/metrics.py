@@ -2,6 +2,7 @@
 
 import math
 
+import numpy as np
 import polars as pl
 
 
@@ -69,6 +70,17 @@ def top_k_returns(pred: pl.DataFrame, k: int) -> pl.DataFrame:
         .agg(ret=pl.col("fwd_return").mean())
         .sort("timestamp")
     )
+
+
+def cross_sectional_corr(feats: pl.DataFrame, names: list[str]) -> np.ndarray:
+    """[F, F] Spearman correlation of each feature pair across nodes on each date, averaged
+    over dates: how similar two inputs look to a model that sees ranks within a date."""
+    m = np.eye(len(names))
+    for i, a in enumerate(names):
+        for j in range(i + 1, len(names)):
+            per_date = feats.group_by("timestamp").agg(c=pl.corr(a, names[j], method="spearman"))
+            m[i, j] = m[j, i] = per_date["c"].drop_nans().drop_nulls().mean()  # type: ignore[assignment]
+    return m
 
 
 def universe_returns(pred: pl.DataFrame) -> pl.DataFrame:

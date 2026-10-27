@@ -65,6 +65,7 @@ def to_data(
         edge_attr=torch.from_numpy(np.ascontiguousarray(edge_attr)),
         y=torch.from_numpy(np.nan_to_num(y)),
         label_mask=torch.from_numpy(label_mask),
+        node_type=torch.from_numpy(s.node_type),
         node_ids=s.node_ids.tolist(),
         timestamp=s.timestamp,
     )

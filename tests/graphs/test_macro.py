@@ -85,7 +85,7 @@ def fixture(tmp_path):
             holdout_start=date(2018, 4, 1),
         ),
         train=dict(loss="listmle", lr=0.001, batch_size=8, max_epochs=2, patience=2, seed=7),
-        eval=dict(quantiles=3, top_k=1, benchmark="SPY", rolling_dates=3),
+        eval=dict(quantiles=3, top_k=1, benchmark="SPY", rolling_dates=3, permutation_repeats=1),
         device="cpu",
     )
     return cfg, prices, ts, path
@@ -249,6 +249,7 @@ def test_requires_safe_normalization_and_verified_provenance(fixture):
 
 def test_shared_run_logs_macro_provenance_predictions_and_reports(fixture, monkeypatch, tmp_path):
     import mlflow
+    from mlflow.artifacts import download_artifacts
 
     import gnns.config as config
     import gnns.graphs.build as build
@@ -269,15 +270,21 @@ def test_shared_run_logs_macro_provenance_predictions_and_reports(fixture, monke
         "config.yaml",
     } <= artifacts
     predictions = pl.read_parquet(
-        mlflow.artifacts.download_artifacts(
+        download_artifacts(
             run_id=run_id,
             artifact_path="predictions_gatv2.parquet",
             dst_path=str(tmp_path / "readback"),
         )
     )
-    assert predictions["timestamp"].max().date() < cfg["walk_forward"]["holdout_start"]
+    last_prediction = predictions["timestamp"].max()
+    assert isinstance(last_prediction, datetime)
+    assert last_prediction.date() < cfg["walk_forward"]["holdout_start"]
     assert not any(n.startswith("macro:") for n in predictions["ticker"])
-    assert len(report(run_id, cfg["data_root"])) == 7
+    charts = report(run_id, cfg["data_root"])
+    assert len(charts) == 10
+    assert {"8_score_spread.png", "9_feature_importance.png", "11_feature_correlation.png"} <= set(
+        charts
+    )
 
 
 def test_local_config_resolves_construction_after_override(tmp_path, monkeypatch):

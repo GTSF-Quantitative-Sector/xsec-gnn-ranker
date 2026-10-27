@@ -129,6 +129,7 @@ class MacroGraphBuilder(GraphBuilder):
         x = np.zeros((total, len(node_names)), dtype=np.float32)
         b = np.array(betas, dtype=np.float32).reshape(count, 5)
         if count:
+            assert standardized is not None
             lev, chg = standardized
             for i, row in enumerate(chosen):
                 x[i, :eq_dim] = np.r_[
