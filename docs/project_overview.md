@@ -43,7 +43,7 @@ We will then divide the top 3 (based on team member interest/vote) GNN construct
 7. ✓ ModelFactory and LossFactory — registries mapping config strings ("gatv2," "graphsage") and ("listmle," "spearman") to actual implementations, plus a shared Trainer class that takes a model, dataset, and loss and runs the training loop. Train on the dummy... sector graph purely to confirm the loop runs, losses decrease, and outputs have the right shape — the actual numbers will be economically meaningless at this stage, and that's fine.
 8. ✓ Evaluator — computes rank IC and decile spread from scored outputs plus realized returns, logged to MLflow. Run it against the dummy graph's training output and manually sanity-check a couple of the IC calculations by hand to confirm the evaluator itself is correct before trusting it on real data.
 9. Finally, build the three real GraphBuilder subclasses — CorrelationGraphBuilder, SupplyChainGraphBuilder, MacroGraphBuilder — in parallel, each producing the same GraphSnapshot schema from step 2.
-10. BacktestEngine — build last, once real model outputs exist, converting rankings into portfolio weights/costs/tearsheet metrics.
+10. ✓ BacktestEngine — build last, once real model outputs exist, converting rankings into portfolio weights/costs/tearsheet metrics.
 
 Note: When actually running/using any part of the pipeline, ensure your changes are only to your local version of the config file for that piece of the pipeline, and do not change any of the actual code on the script itself. We should keep this use requirement in mind when developing each phase of the pipeline above.
 
