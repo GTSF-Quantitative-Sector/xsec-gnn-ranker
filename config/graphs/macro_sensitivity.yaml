@@ -1,0 +1,67 @@
+builder: macro_sensitivity
+universe: sector_etfs
+sources:
+  macro:
+    path: macro/known_at.csv
+params:
+  window_bars: 252
+  min_obs: 200
+  ridge: 10.0
+  lag_bars: 0             # Additional bar lag AFTER verified availability
+  max_stale_bars: 2
+  edge_mode: magnitude   # magnitude | signed | constant | shuffled
+  seed: 7
+features:
+  min_history_bars: 252
+  list:
+    - {name: momentum, bars: 21}
+    - {name: momentum, bars: 63}
+    - {name: momentum, bars: 126}
+    - {name: volatility, bars: 21}
+    - {name: volatility, bars: 63}
+# Both models see the same macro state, exposures and interactions on equity nodes.
+extra_model_features:
+  - macro_level_rates
+  - macro_level_credit
+  - macro_level_vix
+  - macro_level_oil
+  - macro_level_gold
+  - macro_change_rates
+  - macro_change_credit
+  - macro_change_vix
+  - macro_change_oil
+  - macro_change_gold
+  - beta_rates
+  - beta_credit
+  - beta_vix
+  - beta_oil
+  - beta_gold
+  - magnitude_rates
+  - magnitude_credit
+  - magnitude_vix
+  - magnitude_oil
+  - magnitude_gold
+  - interaction_rates
+  - interaction_credit
+  - interaction_vix
+  - interaction_oil
+  - interaction_gold
+  - context_level
+  - context_change
+  - factor_rates
+  - factor_credit
+  - factor_vix
+  - factor_oil
+  - factor_gold
+model_edge_attrs: [beta]
+model:
+  name: gatv2
+  hidden: 32
+  layers: 2
+  heads: 2
+  dropout: 0.1
+baseline:
+  name: mlp
+  hidden: 32
+  layers: 2
+  dropout: 0.1

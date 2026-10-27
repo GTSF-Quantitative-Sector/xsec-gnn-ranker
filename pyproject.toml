@@ -16,6 +16,8 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+# Archived pilot source hashes are part of saved-run verification; lint the shared code.
+extend-exclude = ["experiments/macro-sensitivity"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
