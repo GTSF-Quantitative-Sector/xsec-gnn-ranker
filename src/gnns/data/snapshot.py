@@ -1,6 +1,6 @@
 """GraphSnapshot: the one object graph builders emit. Contract: docs/CONTRACTS.md."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -22,7 +22,10 @@ _ARRAYS = {
     "edge_type": (np.int64, 1),
     "edge_attr": (np.float32, 2),
     "edge_attr_names": ("U", 1),
+    "feature_prescaled": (np.bool_, 1),
 }
+# Default for `feature_prescaled` (no column prescaled); replaced by all False of length F.
+_NOT_PRESCALED = np.zeros(0, dtype=np.bool_)
 
 
 @dataclass(frozen=True, eq=False)
@@ -41,8 +44,13 @@ class GraphSnapshot:
     edge_type_names: tuple[str, ...]
     edge_attr: np.ndarray
     edge_attr_names: np.ndarray
+    # True = the builder already scaled this column; the Dataset passes it through as is.
+    feature_prescaled: np.ndarray = field(default_factory=lambda: _NOT_PRESCALED)
 
     def __post_init__(self) -> None:
+        if self.feature_prescaled is _NOT_PRESCALED and isinstance(self.x, np.ndarray):
+            f = self.x.shape[-1] if self.x.ndim else 0
+            object.__setattr__(self, "feature_prescaled", np.zeros(f, dtype=np.bool_))
         _check_layout(self)
         _check_values(self)
 
@@ -59,8 +67,9 @@ class GraphSnapshot:
 
     @classmethod
     def load(cls, path: Path) -> "GraphSnapshot":
+        """Files saved before `feature_prescaled` existed load with no column prescaled."""
         with np.load(path, allow_pickle=False) as f:
-            kwargs = {name: f[name] for name in _ARRAYS}
+            kwargs = {name: f[name] for name in _ARRAYS if name in f}
             ts = datetime.fromisoformat(str(f["timestamp"])).astimezone(ZoneInfo(TZ))
             return cls(
                 timestamp=ts,
@@ -109,6 +118,7 @@ def _check_layout(s: GraphSnapshot) -> None:
         "target_mask": (n,),
         "feature_names": (f,),
         "feature_owner": (f,),
+        "feature_prescaled": (f,),
         "edge_index": (2, e),
         "edge_weight": (e,),
         "edge_type": (e,),

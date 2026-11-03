@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 
 import polars as pl
 
@@ -13,7 +14,26 @@ class GraphBuilder(ABC):
 
     `inputs` are point-in-time tables, each with a known-at `timestamp` column
     (docs/CONTRACTS.md, "Point-in-time inputs"). `axis` is the universe's bar axis.
+    A builder with extra datasets or config requirements overrides `load_sources` and
+    `check_config`; `build_snapshots` calls both, so shared code never names a builder.
     """
+
+    @classmethod  # noqa: B027 (optional hook; the default accepts every config)
+    def check_config(cls, cfg: dict) -> None:
+        """Raise if the resolved config can't work with this construction.
+
+        Runs before any data is loaded, so it sees config values only (e.g. `normalize`,
+        `horizon_bars`, required `sources:` keys); data checks belong in `load_sources`.
+        """
+
+    @classmethod
+    def load_sources(cls, root: Path, sources: dict) -> dict[str, tuple[pl.DataFrame, dict]]:
+        """Extra point-in-time inputs beyond prices and features, from the graph file's
+        `sources:`, each with the manifest it was opened with (`gnns.data.store.open`).
+
+        `root` is the data root. Loaders live in `gnns.data`; this method calls them.
+        """
+        return {}
 
     def __init__(self, inputs: dict[str, pl.DataFrame], axis: pl.Series) -> None:
         if missing := sorted(self.lookbacks().keys() - inputs.keys()):

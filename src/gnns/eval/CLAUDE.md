@@ -17,7 +17,8 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
   matched baseline share each chart: IC over time, cumulative IC, IC by fold, quantile
   cascade, quantile equity curves, training curves (portfolio charts: backtest below).
 - Every `gnns train` run logs to MLflow (`mlflow.db` + `mlruns/`, gitignored): resolved
-  config, `git_sha` tag, dataset manifest, test IC metrics, `<model>_val_ic` (mean over
+  config, `git_sha` tag, `manifest_<name>.json` for each dataset it opened (as read at
+  open time: `prices` and each builder source), test IC metrics, `<model>_val_ic` (mean over
   folds of the kept epoch's validation IC: the metric to compare and select runs on;
   optimistic, so never reported as performance), training histories and predictions.
   `gnns train` always saves predictions; dropping them for losing sweep
@@ -55,7 +56,8 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
   (tested), which is kept for that reconciliation.
 - Benchmark (SPY) and risk-free (BIL, a T-bill ETF in `benchmarks`) returns come from
   `labels.forward_returns` over the run's horizon, so they cover the same open-to-open
-  windows as the portfolio. Sharpe is over BIL, IR over SPY. Drawdown length is in
+  windows as the portfolio. They are read with `store.open`, and its manifest is logged
+  as `backtest/manifest_benchmarks.json`. Sharpe is over BIL, IR over SPY. Drawdown length is in
   trading days, comparable across horizons.
 - The run's saved config gives `horizon_bars` and `data.bar`; the current `backtest:`
   block gives the portfolio rules, so old runs can be re-costed. Settings are logged as

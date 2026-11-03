@@ -69,6 +69,31 @@ def test_invalid_snapshot_raises(overrides, message):
         _snapshot(**overrides)
 
 
+def test_feature_prescaled_defaults_to_none_prescaled():
+    p = _snapshot().feature_prescaled
+    assert p.dtype == np.bool_ and p.tolist() == [False, False, False]
+
+
+def test_feature_prescaled_round_trips(tmp_path):
+    s = _snapshot(feature_prescaled=np.array([False, True, False]))
+    s.save(tmp_path / "s.npz")
+    assert GraphSnapshot.load(tmp_path / "s.npz").feature_prescaled.tolist() == [False, True, False]
+
+
+def test_file_saved_before_feature_prescaled_loads_as_none_prescaled(tmp_path):
+    _snapshot().save(tmp_path / "new.npz")
+    with np.load(tmp_path / "new.npz") as f:
+        old = {k: f[k] for k in f.files if k != "feature_prescaled"}
+    np.savez(tmp_path / "old.npz", **old)
+    loaded = GraphSnapshot.load(tmp_path / "old.npz")
+    assert loaded.feature_prescaled.tolist() == [False, False, False]
+
+
+def test_feature_prescaled_needs_one_flag_per_column():
+    with pytest.raises(ValueError, match=re.escape("feature_prescaled: shape (2,)")):
+        _snapshot(feature_prescaled=np.array([True, False]))
+
+
 def test_replace_revalidates():
     with pytest.raises(ValueError, match="self-loops"):
         replace(_snapshot(), edge_index=np.array([[0, 0], [0, 1]]))

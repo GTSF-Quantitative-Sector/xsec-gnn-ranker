@@ -8,6 +8,11 @@ Every loader here outputs a `timestamp` column meaning when each row became know
 (`docs/CONTRACTS.md`, "Point-in-time inputs"), and has a look-ahead test. Prices (bar end)
 and features (computed at `t` from bars `<= t`) already comply.
 
+Every dataset is a folder with one Parquet file and a `manifest.json` carrying the core
+fields (`docs/CONTRACTS.md`, "manifest.json"). Every read goes through `store.open` (or
+`store.load` for prices), which returns the manifest the caller logs. A source loader
+calls `store.open`, then adds only its own checks.
+
 ## FeatureEngine decisions
 
 - Computes equity node features for the whole price history at once, returning one long

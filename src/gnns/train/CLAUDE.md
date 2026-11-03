@@ -36,5 +36,9 @@ loop. This layer reads machine settings.
   shared function (`dataset.normalize`, so analysis can reproduce what the model saw).
   Config `normalize: rank | zscore | none` in `config/config.yaml`, set to `rank` (percentile scaled to [-1, 1], ties
   averaged, a lone node gets 0); `zscore` is clipped at ±3.
-- Single-node types can't be normalized cross-sectionally; they'll need per-fold
-  time-series scaling once the supply-chain and macro builders exist.
+- Columns the builder marked `feature_prescaled` skip that scaling and reach the model as
+  the builder computed them; the rest of the snapshot is still scaled with `normalize`.
+  The model and the baseline see the same values, because both go through `to_data`.
+- Single-node types and values shared by every node at `t` can't be normalized
+  cross-sectionally (rank makes them 0). The builder scales them itself, as time-series
+  scaling from data known by `t`, and marks them `feature_prescaled`.

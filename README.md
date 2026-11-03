@@ -41,6 +41,11 @@ Create `.env` at the repo root (gitignored) with your Massive API key:
 Per-machine settings go in `config/machine.yaml` (gitignored, optional):
 
     data_root: data   # where datasets are written (default: data/)
+    graph: sector_etf_corr   # optional: try a construction locally (team default: config.yaml)
+
+Any top-level key in `machine.yaml` (e.g. `graph:`, `normalize:`) overrides the shared
+value in `config/config.yaml`. The override replaces the key whole: nested blocks such as
+`train:` are not merged, so copy the full block to change one of its values.
 
 ### CI
 
@@ -99,6 +104,10 @@ MLflow runs stay per slot. From the home repo, with conda available:
     python scripts/slot.py sync                 # after a merge: update main, free slots
     python scripts/slot.py remove 1             # delete a slot's worktree and env
 
+`setup` copies every line of the home `config/machine.yaml` except `data_root` into the new
+slot, so a local override there (e.g. `graph:`) carries into every slot set up afterwards.
+Edit a slot's own `config/machine.yaml` to change it there.
+
 `start` refuses if the slot has uncommitted work, reuses the branch if it already exists,
 and updates the slot's env only when `environment.yml` changed. Pull `main` in the home
 repo first. Then start the session from a prompt with the slot's env active (`conda
@@ -140,16 +149,30 @@ and dividends as of the build date, so every build re-downloads the full range. 
 are validated before any is written; if one fails, the build stops with a list of problems
 and leaves every existing dataset untouched.
 
+Every dataset, including a construction's extra sources, is a folder with its data file and
+one `manifest.json` (source, file, rows, sha256, build time, git SHA). **Datasets built
+before the manifest gained `source` and `file` must be rebuilt once:** run `gnns build-data`
+again; the error names the folder if you haven't.
+
 To use a dataset in code: `gnns.data.store.load(root, universe, bar, start, end)` returns a
-polars `LazyFrame`.
+polars `LazyFrame` of prices; `gnns.data.store.open(folder)` returns any dataset's
+`(LazyFrame, manifest)`.
 
 ### Build graph snapshots
 
-Needs the construction's universe built first (`gnns build-data`).
+Needs the construction's universe built first (`gnns build-data`), plus any extra datasets
+its doc lists.
 
-1. Pick a construction in `config/config.yaml` with `graph: <name>`. Everything specific to
-   it lives in `config/graphs/<name>.yaml`: builder, universe, `params`, its own node
-   `features`, and later `sources`:
+Available constructions:
+
+| `graph:` | What it is | Doc |
+| :-- | :-- | :-- |
+| `sector_etf_corr` | 11 sector ETFs, edges = rolling return correlation; exercises the pipeline | [docs/graphs/sector_etf_corr.md](docs/graphs/sector_etf_corr.md) |
+
+1. The team default construction is `graph: <name>` in `config/config.yaml`. To try another
+   one locally, put `graph: <name>` in `config/machine.yaml` (see Setup). Everything
+   specific to a construction lives in `config/graphs/<name>.yaml`: builder, universe,
+   `params`, its own node `features`, and `sources` (extra datasets, if any):
 
        builder: sector_etf_correlation
        universe: sector_etfs
@@ -170,7 +193,12 @@ Needs the construction's universe built first (`gnns build-data`).
    (count, date range, node and edge counts); nothing is written to disk.
 
 `min_history_bars` must cover the builder's price window (e.g. `window_bars`); the command
-stops with an error otherwise.
+stops with an error otherwise. A builder can also reject settings it can't work with; that
+check runs before any data is loaded.
+
+A date where the builder returns no target node (e.g. its own inputs aren't available yet)
+is dropped, and the command logs how many were dropped and the first and last such date.
+If every date is dropped it stops with an error.
 
 ### Train, evaluate and plot
 
@@ -184,7 +212,8 @@ Needs the construction's universe and the `benchmarks` universe built (`gnns bui
    rolling-IC window), `backtest` (see "Backtest") and `normalize`.
 3. Run `gnns train`. It trains the model and the baseline on every search fold (held-out
    folds are never touched), stopping early on validation rank IC, scores each fold's
-   test period, and logs an MLflow run: resolved config, git SHA, dataset manifest,
+   test period, and logs an MLflow run: resolved config, git SHA, the manifest of each
+   dataset it read (`manifest_prices.json`, plus one per extra source, as read at the start),
    test IC metrics, validation IC (`<model>_val_ic`, the column to compare runs on),
    training histories and predictions. It then backtests the run (see "Backtest") and
    makes its charts (step 5), and prints the run id with a backtest summary.
@@ -216,7 +245,8 @@ Needs the `benchmarks` universe built with the `backtest.benchmark` and
    are not built). To backtest a run again, e.g. after changing `backtest:`, run
    `gnns backtest <run_id>`: it uses the run's saved predictions, horizon and bar with the
    current `backtest:` settings, and replaces the run's backtest metrics, `backtest.*`
-   tags and `backtest/` artifacts.
+   tags and `backtest/` artifacts (including `manifest_benchmarks.json`, the benchmarks
+   dataset it used).
 
 Terms: the horizon (`horizon_bars`) is a length; a rebalance is one snapshot date where
 the portfolio is set, then held for one horizon until the next rebalance, so each

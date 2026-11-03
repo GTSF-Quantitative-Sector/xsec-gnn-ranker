@@ -82,3 +82,4 @@ Top-level modules (added when needed): `config.py` (loads `config.yaml` + `machi
 | GitHub Issues (`gh issue list`) | what's in progress and what's next |
 | `docs/CONTRACTS.md` | locked interfaces (GraphSnapshot, config schema) |
 | `docs/RESEARCH_PROTOCOL.md` | walk-forward, purge, MLflow conventions |
+| `docs/graphs/<name>.md` | one per construction (with `config/graphs/<name>.yaml`): hypothesis, nodes/edges/features, datasets, params, status |

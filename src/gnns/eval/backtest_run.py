@@ -6,6 +6,7 @@ without retraining. Reruns replace the metrics, `backtest.*` tags and `backtest/
 artifacts. Commands that produce a run call it afterwards (`gnns.cli`).
 """
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -15,6 +16,7 @@ import yaml
 from mlflow.artifacts import download_artifacts
 
 from gnns.config import ROOT, mlflow_tracking_uri
+from gnns.data import store
 from gnns.data.labels import forward_returns
 from gnns.eval import backtest as bt
 from gnns.eval import metrics, plots
@@ -35,9 +37,10 @@ def backtest(run_id: str, cfg: dict) -> dict[str, float]:
         run_cfg = yaml.safe_load((src / "config.yaml").read_text())
         files = sorted(src.glob("predictions_*.parquet"))
         preds = {f.stem.removeprefix("predictions_"): pl.read_parquet(f) for f in files}
-        refs = reference_returns(run_cfg, settings, cfg["data_root"])
+        refs, manifest = reference_returns(run_cfg, settings, cfg["data_root"])
         out = Path(tmp) / "out"
         out.mkdir()
+        (out / "manifest_benchmarks.json").write_text(json.dumps(manifest, indent=2))
         h, bar = run_cfg["horizon_bars"], run_cfg["data"]["bar"]
         results = run_backtest(preds, refs, settings, h, bar, out)
         (out / "backtest.yaml").write_text(yaml.safe_dump(settings, sort_keys=False))
@@ -92,12 +95,15 @@ def run_backtest(
     return results
 
 
-def reference_returns(run_cfg: dict, settings: dict, data_root: str) -> pl.DataFrame:
-    """(timestamp, benchmark, risk_free) forward returns over the run's horizon."""
-    path = ROOT / data_root / "benchmarks" / run_cfg["data"]["bar"] / "prices.parquet"
-    if not path.exists():
-        raise BenchmarksMissing(f"{path} not built; run gnns build-data with benchmarks")
-    fwd = forward_returns(pl.read_parquet(path), run_cfg["horizon_bars"])
+def reference_returns(run_cfg: dict, settings: dict, data_root: str) -> tuple[pl.DataFrame, dict]:
+    """(timestamp, benchmark, risk_free) forward returns over the run's horizon, and the
+    benchmarks dataset's manifest as read when it was opened."""
+    dest = ROOT / data_root / "benchmarks" / run_cfg["data"]["bar"]
+    try:
+        lf, manifest = store.open(dest)
+    except FileNotFoundError as e:
+        raise BenchmarksMissing(f"{dest} not built; run gnns build-data with benchmarks") from e
+    fwd = forward_returns(lf.collect(), run_cfg["horizon_bars"])
     tickers = set(fwd["ticker"].unique().to_list())
     cols = []
     for role in REFS:
@@ -109,7 +115,7 @@ def reference_returns(run_cfg: dict, settings: dict, data_root: str) -> pl.DataF
             )
         rows = fwd.filter(pl.col("ticker") == ticker)
         cols.append(rows.select("timestamp", pl.col("fwd_return").alias(role)))
-    return cols[0].join(cols[1], on="timestamp")
+    return cols[0].join(cols[1], on="timestamp"), manifest
 
 
 def summary_lines(results: dict[str, float], cost_bps: list[float]) -> list[str]:
