@@ -34,7 +34,7 @@ def run(cfg: dict) -> str:
     device = cfg.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")
     root = ROOT / cfg["data_root"]
 
-    snaps = build_snapshots(cfg)
+    snaps, manifests = build_snapshots(cfg)  # manifests as read at open time
     prices = store.load(root, graph["universe"], cfg["data"]["bar"]).collect()
     labels = forward_returns(prices, h)
     axis = prices["timestamp"].unique().sort()
@@ -91,7 +91,7 @@ def run(cfg: dict) -> str:
             p.write_parquet(out / f"predictions_{label}.parquet")
         (out / "histories.json").write_text(json.dumps(histories))
         (out / "importance.json").write_text(json.dumps(importances))
-        return _log_mlflow(cfg, summary, out, root)
+        return _log_mlflow(cfg, summary, out, manifests)
 
 
 def _summarize(pred: pl.DataFrame, periods_per_year: float) -> dict:
@@ -117,7 +117,8 @@ def _mean_importance(folds: list[dict[str, float]]) -> dict[str, float]:
     return {k: sum(f[k] for f in folds) / len(folds) for k in folds[0]}
 
 
-def _log_mlflow(cfg: dict, summary: dict, out: Path, root: Path) -> str:
+def _log_mlflow(cfg: dict, summary: dict, out: Path, manifests: dict[str, dict]) -> str:
+    """Log config, git SHA, one `manifest_<name>.json` per dataset opened, metrics and `out`."""
     mlflow.set_tracking_uri(mlflow_tracking_uri())
     name = cfg["graph"]["name"]
     if mlflow.get_experiment_by_name(name) is None:
@@ -129,8 +130,8 @@ def _log_mlflow(cfg: dict, summary: dict, out: Path, root: Path) -> str:
         mlflow.set_tag("git_sha", git_sha())
         mlflow.log_params(_flatten({k: v for k, v in cfg.items() if k != "data_root"}))
         (out / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
-        manifest = root / cfg["graph"]["universe"] / cfg["data"]["bar"] / "manifest.json"
-        (out / "manifest.json").write_text(manifest.read_text())
+        for dataset, manifest in manifests.items():
+            (out / f"manifest_{dataset}.json").write_text(json.dumps(manifest, indent=2))
         for label, s in summary.items():
             mlflow.log_metrics({f"{label}_{k}": v for k, v in s.items() if k != "fold_ic"})
             for fold, ic in enumerate(s["fold_ic"], start=1):

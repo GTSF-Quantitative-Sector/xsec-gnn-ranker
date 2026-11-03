@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 
 import polars as pl
@@ -5,6 +6,9 @@ import pytest
 from polars.testing import assert_frame_equal
 
 from gnns.data import store
+
+# Fields every caller of store.write supplies (it adds file, rows and sha256).
+MANIFEST = {"source": "test", "built_at": "2024-01-01T00:00:00+00:00", "git_sha": "test"}
 
 
 def _prices(rows: list[tuple[date, str, float]]) -> pl.DataFrame:
@@ -56,7 +60,39 @@ def test_validate_reports_every_violation():
 
 def test_write_then_load_round_trips(tmp_path):
     prices = _prices([(date(2024, 1, d), "A", 10.0) for d in (2, 3)])
-    store.write(prices, tmp_path / "u" / "1d", {"universe": "u"})
+    store.write(prices, tmp_path / "u" / "1d", MANIFEST | {"universe": "u"})
     assert_frame_equal(store.load(tmp_path, "u", "1d").collect(), prices)
     assert store.load(tmp_path, "u", "1d", start=date(2024, 1, 3)).collect().height == 1
     assert not list((tmp_path / "u" / "1d").glob("*.tmp"))
+
+
+def test_open_returns_data_and_manifest(tmp_path):
+    events = pl.DataFrame({"timestamp": [datetime(2024, 1, 2, 16)], "v": [1.0]})
+    store.write(events, tmp_path / "events", MANIFEST | {"kind": "toy"}, file="events.parquet")
+    lf, manifest = store.open(tmp_path / "events")
+    assert_frame_equal(lf.collect(), events)
+    assert manifest["file"] == "events.parquet" and manifest["rows"] == 1
+    assert manifest.keys() >= store.CORE | {"kind"}
+
+
+def test_open_raises_without_manifest(tmp_path):
+    (tmp_path / "d").mkdir()
+    pl.DataFrame({"v": [1]}).write_parquet(tmp_path / "d" / "prices.parquet")
+    with pytest.raises(FileNotFoundError, match="rebuild the dataset"):
+        store.open(tmp_path / "d")
+
+
+def test_open_raises_on_missing_core_field(tmp_path):
+    dest = tmp_path / "d"
+    store.write(_prices([(date(2024, 1, 2), "A", 10.0)]), dest, MANIFEST)
+    manifest = json.loads((dest / "manifest.json").read_text())
+    del manifest["source"]
+    (dest / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match=r"lacks \['source'\]; rebuild the dataset"):
+        store.open(dest)
+
+
+def test_write_refuses_a_manifest_without_core_fields(tmp_path):
+    with pytest.raises(ValueError, match="lacks"):
+        store.write(_prices([(date(2024, 1, 2), "A", 10.0)]), tmp_path / "d", {"universe": "u"})
+    assert not (tmp_path / "d").exists()

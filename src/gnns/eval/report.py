@@ -17,7 +17,7 @@ import yaml
 from mlflow.artifacts import download_artifacts
 
 from gnns.config import ROOT, mlflow_tracking_uri
-from gnns.data import features
+from gnns.data import features, store
 from gnns.data.features import column_names
 from gnns.eval import metrics, plots
 
@@ -89,12 +89,13 @@ def _fold_ic(ic: pl.DataFrame, pred: pl.DataFrame) -> pl.DataFrame:
 def _feature_corr(cfg: dict, data_root: str) -> tuple[np.ndarray, list[str]] | None:
     """Within-date correlation of the construction's features, search period only."""
     graph = cfg["graph"]
-    path = ROOT / data_root / graph["universe"] / cfg["data"]["bar"] / "prices.parquet"
-    if not path.exists():
+    try:
+        prices = store.load(ROOT / data_root, graph["universe"], cfg["data"]["bar"]).collect()
+    except FileNotFoundError:
         log.warning("%s dataset not built; skipping feature correlation", graph["universe"])
         return None
     names = column_names(graph["features"]["list"])
-    feats = features.compute(pl.read_parquet(path), graph["features"]).filter(
+    feats = features.compute(prices, graph["features"]).filter(
         pl.col("timestamp").dt.date() < cfg["walk_forward"]["holdout_start"]
     )
     return metrics.cross_sectional_corr(feats, names), names

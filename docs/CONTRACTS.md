@@ -42,14 +42,20 @@ tz-aware `America/New_York` column **`timestamp` meaning when the row became kno
 
 ## Storage layout
 
-One dataset per (universe, bar size). `data/` is gitignored. Each universe's ticker list
-is tracked at `config/universes/<universe>.txt`, one ticker per line. Benchmarks live in
+**Every dataset** (prices, benchmarks, and any construction-specific source) is one folder
+holding its data file (Parquet) and one `manifest.json` with the core fields ("manifest.json"
+below). `data/` is gitignored.
+
+Price datasets: one per (universe, bar size). Each universe's ticker list is tracked at `config/universes/<universe>.txt`, one ticker per line. Benchmarks live in
 their own `benchmarks` universe, built on the same bar size and range as the construction
 universes, and never appear in a construction's list (every universe ticker is a node).
 
     data/<universe>/<bar>/
       prices.parquet
       manifest.json
+
+A construction-specific source is a folder under the data root, named in its graph file's
+`sources:` (e.g. `data/macro/` with `macro.parquet` and `manifest.json`).
 
 A dataset is rebuilt in full, never appended to: new splits/dividends rescale history.
 Writes are atomic (write temp, then rename), and nothing is written if validation fails.
@@ -83,11 +89,38 @@ bar-axis × ticker matrix pivot and get NaN where a ticker has no bar.
 
 ## Loading
 
-`gnns.data.store.load(root, universe, bar, start=None, end=None) -> pl.LazyFrame` scans one
-dataset, optionally filtered to bar dates in `[start, end]`. The engine is polars;
-consumers needing numpy or pandas convert at the edge.
+Every dataset read goes through `gnns.data.store`; nothing reads a dataset's Parquet
+directly.
+
+- `store.open(dest) -> (pl.LazyFrame, dict)` reads one dataset folder: its data file,
+  lazily, and its manifest. It raises, naming the folder and "rebuild the dataset", if
+  `manifest.json` is missing or lacks a core field. There is no hash check on read: the
+  pipeline always writes the data file and its manifest together, and the logged
+  `sha256` identifies the data version in each run.
+- `store.load(root, universe, bar, start=None, end=None) -> pl.LazyFrame` opens one price
+  dataset, optionally filtered to bar dates in `[start, end]`, and drops the manifest.
+- `store.write(df, dest, manifest, file="prices.parquet")` writes the data file and the
+  manifest atomically, adding `file`, `rows` and `sha256`. It refuses a manifest without
+  the other core fields.
+- A construction-specific source's loader (in `gnns.data`) calls `store.open`, then adds
+  only its own checks.
+
+The engine is polars; consumers needing numpy or pandas convert at the edge.
 
 ## manifest.json
+
+Core fields, in every dataset's manifest:
+
+| Field | Type | Notes |
+| :-- | :-- | :-- |
+| `source` | str | where the data came from, e.g. `massive`, `fred` |
+| `file` | str | the data file in the folder, e.g. `prices.parquet` |
+| `rows` | int | row count of `file` |
+| `sha256` | str | hash of `file` |
+| `built_at` | str (ISO datetime, UTC) | when it was built; for prices, the adjustment reference date |
+| `git_sha` | str | code version that built the dataset |
+
+Each kind of dataset adds its own fields. Price datasets:
 
 | Field | Type | Notes |
 | :-- | :-- | :-- |
@@ -95,12 +128,10 @@ consumers needing numpy or pandas convert at the edge.
 | `bar` | str | e.g. `1d` |
 | `start`, `end` | str (ISO date) | requested range, inclusive |
 | `tickers` | list[str] | requested universe |
-| `built_at` | str (ISO datetime, UTC) | adjustment reference date |
-| `git_sha` | str | code version that built the dataset |
-| `rows` | int | row count of `prices.parquet` |
-| `sha256` | str | hash of `prices.parquet` |
 
-Every pipeline run logs the manifest of each dataset it reads to MLflow.
+Every pipeline run logs to MLflow the manifest of each dataset it opened, as read when it
+was opened (not re-read later), as `manifest_<name>.json`: `gnns train` logs `prices` and
+each of the builder's sources; `gnns backtest` logs `backtest/manifest_benchmarks.json`.
 
 ## Labels
 
@@ -137,6 +168,7 @@ of it — `gnns.data.labels.forward_returns` supplies them to training and eval.
 | `x` | `float32 [N, F]` | node features, column blocks per type (below) |
 | `feature_names` | `str [F]` | unique |
 | `feature_owner` | `int64 [F]` | node type that owns each column |
+| `feature_prescaled` | `bool [F]` | `True` = the builder already scaled this column, so the Dataset leaves it as is; optional, defaults to all `False` |
 | `edge_index` | `int64 [2, E]` | row 0 source, row 1 destination; messages flow source → destination |
 | `edge_weight` | `float32 [E]` | 1.0 for unweighted edges |
 | `edge_type` | `int64 [E]` | index into `edge_type_names` |
@@ -153,7 +185,8 @@ of it — `gnns.data.labels.forward_returns` supplies them to training and eval.
 - `x`, `edge_weight`, `edge_attr` are finite; `edge_weight >= 0`.
 - `edge_index` values are in `[0, N)`; no self-loops (models add their own).
 - Undirected relations are stored in both directions with equal weight and attributes.
-- A snapshot round-trips through a file losslessly.
+- A snapshot round-trips through a file losslessly. Files saved before `feature_prescaled`
+  existed load with it all `False`.
 
 ### What reaches the model
 
@@ -163,6 +196,13 @@ construction's `features` (its graph file's `features.list`) plus any builder-ad
 columns listed in `extra_model_features`, and only the edge columns listed in
 `model_edge_attrs`. Both lists default to empty, so analysis-only columns reach the model
 only when listed explicitly.
+
+The Dataset scales each model column across the nodes of its owning type at `t`, with the
+shared `normalize` setting, except columns marked `feature_prescaled`, which pass through
+unchanged. A builder marks a column prescaled when cross-sectional scaling would destroy it:
+a value that is the same for every node at `t` (all ties under `rank`), or a column owned by
+a node type with one node. It must have scaled the column itself using only data known by
+`t`. Prescaled and raw columns can mix in one snapshot under any `normalize` setting.
 
 ## Open questions
 
