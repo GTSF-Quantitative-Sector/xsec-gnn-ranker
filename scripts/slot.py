@@ -3,11 +3,12 @@
 Each slot is a sibling folder of the home repo (<repo>-slot<N>) with its own conda env
 (gnns-slot<N>, cloned from gnns once) and the package installed from that folder, so the
 slot always runs its own code. Datasets are shared with the home repo via machine.yaml.
-Stdlib only; run it from any env that has `conda` available.
+Stdlib only; run it from any env that has `conda` available (`sync` also needs `gh`).
 
     python scripts/slot.py setup 1 2 3         # create slots (slow only the first time)
     python scripts/slot.py start 1 backtester  # new branch from main in slot 1 (seconds)
     python scripts/slot.py list
+    python scripts/slot.py sync                # after a merge: update main, free slots
     python scripts/slot.py remove 1
 """
 
@@ -15,10 +16,15 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+from issue_check import gh
 
 BASE_ENV = "gnns"
 MARKER = "slot-env-sha"  # environment.yml hash the slot env was last synced to
@@ -47,6 +53,10 @@ def home() -> Path:
 def slot_path(n: int) -> Path:
     h = home()
     return h.parent / f"{h.name}-slot{n}"
+
+
+def slot_paths() -> list[Path]:
+    return sorted(home().parent.glob(f"{home().name}-slot*"))
 
 
 def env_name(n: int) -> str:
@@ -138,10 +148,93 @@ def start(n: int, task: str) -> None:
 
 
 def show() -> None:
-    for p in sorted(home().parent.glob(f"{home().name}-slot*")):
+    for p in slot_paths():
         n = p.name.rsplit("slot", 1)[1]
         branch = run("git", "branch", "--show-current", cwd=p, capture=True) or "(detached)"
         print(f"slot{n}: {branch:24s} {'uncommitted changes' if dirty(p) else 'clean'}  {p}")
+
+
+BLOCKERS = """blockedBy(first: 20) { nodes { number state timelineItems(itemTypes: [CLOSED_EVENT],
+last: 1) { nodes { ... on ClosedEvent { closer { ... on PullRequest { mergeCommit { oid } } } } } }
+} }"""
+
+
+def blockers(numbers: list[int]) -> dict[int, list[dict[str, Any]]]:
+    """Each issue's blockers: number, open, and the merge commit of the PR that closed it."""
+    issues = " ".join(f"i{n}: issue(number: {n}) {{ {BLOCKERS} }}" for n in numbers)
+    query = f"query($o: String!, $r: String!) {{ repository(owner: $o, name: $r) {{ {issues} }} }}"
+    args = ["-F", "o={owner}", "-F", "r={repo}", "-f", f"query={query}"]
+    repo = json.loads(gh("api", "graphql", *args))["data"]["repository"]
+    out = {}
+    for n in numbers:
+        out[n] = []
+        for b in repo[f"i{n}"]["blockedBy"]["nodes"]:
+            closer = (b["timelineItems"]["nodes"] or [{}])[0].get("closer") or {}
+            commit = (closer.get("mergeCommit") or {}).get("oid")
+            out[n].append({"number": b["number"], "open": b["state"] == "OPEN", "commit": commit})
+    return out
+
+
+def has_commit(branch: str, commit: str) -> bool:
+    git = ["git", "merge-base", "--is-ancestor", commit, branch]
+    return subprocess.run(git, cwd=home(), capture_output=True).returncode == 0
+
+
+def status(blocked_by: list[dict[str, Any]], contains: Callable[[str], bool]) -> str:
+    """Blocked while a blocker is open; resume once a blocker's closing PR is on main but not
+    yet in the branch; otherwise working."""
+    if found := [b["number"] for b in blocked_by if b["open"]]:
+        return "blocked on " + ", ".join(f"#{b}" for b in found)
+    if found := [b["number"] for b in blocked_by if b["commit"] and not contains(b["commit"])]:
+        reads = ", ".join(f"#{b}" for b in found)
+        return f"resume: rebase on main, then read the Resolution of {reads}"
+    return "working"
+
+
+def sync() -> None:
+    """After a merge: update main, free the slots of merged branches, show each thread."""
+    h = home()
+    os.chdir(h)  # gh finds the GitHub repo from the current folder
+    if run("git", "branch", "--show-current", cwd=h, capture=True) != "main" or dirty(h):
+        sys.exit(f"home ({h}) must be on main with no uncommitted changes")
+    before = run("git", "rev-parse", "--short", "main", cwd=h, capture=True)
+    run("git", "pull", "-q", "--ff-only", "--prune", cwd=h)
+    print(f"home: main {before}..{run('git', 'rev-parse', '--short', 'main', cwd=h, capture=True)}")
+    slots = {p: run("git", "branch", "--show-current", cwd=p, capture=True) for p in slot_paths()}
+    try:
+        refs = run(
+            "git", "for-each-ref", "--format=%(refname:short)", "refs/heads", cwd=h, capture=True
+        )
+        for b in refs.split():
+            if b == "main":
+                continue
+            merged = gh("pr", "list", "--state", "merged", "--head", b, "--json", "headRefOid",
+                        "-q", ".[].headRefOid").split()  # fmt: skip
+            if not merged:
+                continue
+            if run("git", "rev-parse", b, cwd=h, capture=True) not in merged:
+                print(f"{b}: PR merged, but the branch has newer commits; kept")
+                continue
+            held = [p for p, sb in slots.items() if sb == b]
+            if busy := [p.name for p in held if dirty(p)]:
+                print(f"{b}: merged, but {', '.join(busy)} has uncommitted changes; kept")
+                continue
+            for p in held:
+                run("git", "switch", "-q", "--detach", "main", cwd=p)
+                slots[p] = ""
+            run("git", "branch", "-q", "-D", b, cwd=h)
+            print(f"{b}: merged; branch deleted" + "".join(f", {p.name} at main" for p in held))
+        work = {p: int(m[1]) for p, b in slots.items() if (m := re.match(r"(\d+)-", b))}
+        found = blockers(sorted(set(work.values()))) if work else {}
+    except (OSError, subprocess.CalledProcessError) as e:
+        msg = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
+        sys.exit(f"stopped after updating main (merged branches and threads need gh): {msg}")
+    for p, b in slots.items():
+        if p in work:
+            state = status(found[work[p]], lambda c, b=b: has_commit(b, c))
+        else:
+            state = "" if b else "idle"
+        print(f"{p.name}: {b or '(detached)'}" + (f": {state}" if state else ""))
 
 
 def remove(n: int, force: bool) -> None:
@@ -163,6 +256,7 @@ def main() -> None:
     s.add_argument("slot", type=int)
     s.add_argument("task", help="branch name, e.g. backtester")
     sub.add_parser("list", help="show slots, branches, uncommitted work")
+    sub.add_parser("sync", help="after a merge: update main, free merged slots, show threads")
     r = sub.add_parser("remove", help="delete a slot's worktree and env")
     r.add_argument("slot", type=int)
     r.add_argument("--force", action="store_true", help="discard uncommitted changes")
@@ -174,6 +268,8 @@ def main() -> None:
         start(args.slot, args.task)
     elif args.cmd == "list":
         show()
+    elif args.cmd == "sync":
+        sync()
     else:
         remove(args.slot, args.force)
 

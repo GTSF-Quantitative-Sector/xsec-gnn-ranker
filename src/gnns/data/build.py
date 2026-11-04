@@ -26,6 +26,7 @@ def build(cfg: dict) -> list[Path]:
     for universe, (tickers, prices) in fetched.items():
         dest = ROOT / cfg["data_root"] / universe / bar
         manifest = {
+            "source": "massive",
             "universe": universe,
             "bar": bar,
             "start": str(start),

@@ -6,7 +6,7 @@ import polars as pl
 from gnns.eval.report import make_charts
 
 CFG = {
-    "eval": {"quantiles": 3, "top_k": 2, "benchmark": "SPY", "rolling_dates": 3},
+    "eval": {"quantiles": 3, "rolling_dates": 3},
     "horizon_bars": 5,
 }
 
@@ -38,11 +38,10 @@ def test_make_charts_writes_every_png(tmp_path):
             for e in (1, 2)
         ]
     ] * 3
-    bench = _pred(2).filter(pl.col("ticker") == "A").select("timestamp", ret="fwd_return")
     imp = [{"mom": 0.05, "vol": -0.01, "edges": 0.02}] * 3
     corr = (np.array([[1.0, 0.4], [0.4, 1.0]]), ["mom", "vol"])
     make_charts(
-        preds, {"gatv2": hist, "mlp": hist}, CFG, bench, tmp_path, {"gatv2": imp, "mlp": imp}, corr
+        preds, {"gatv2": hist, "mlp": hist}, CFG, tmp_path, {"gatv2": imp, "mlp": imp}, corr
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == [
         "10_training_curves.png",
@@ -52,7 +51,6 @@ def test_make_charts_writes_every_png(tmp_path):
         "4_ic_by_fold.png",
         "5_quantile_cascade.png",
         "6_quantile_curves.png",
-        "7_equity_curves.png",
         "8_score_spread.png",
         "9_feature_importance.png",
     ]

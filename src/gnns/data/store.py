@@ -1,4 +1,4 @@
-"""Adjust, validate, write and load price datasets. Schema: docs/CONTRACTS.md."""
+"""Adjust and validate price datasets; write and open any dataset. Schema: docs/CONTRACTS.md."""
 
 import hashlib
 import json
@@ -10,6 +10,7 @@ import polars as pl
 
 PRICE_COLS = ["timestamp", "ticker", "open", "high", "low", "close", "volume"]
 OHLC = ["open", "high", "low", "close"]
+CORE = {"source", "file", "rows", "sha256", "built_at", "git_sha"}  # in every manifest.json
 
 
 def adjust(prices: pl.DataFrame, dividends: pl.DataFrame) -> pl.DataFrame:
@@ -51,23 +52,40 @@ def validate(prices: pl.DataFrame, tickers: list[str], start: date, end: date) -
         raise ValueError("validation failed:\n  " + "\n  ".join(errors))
 
 
-def write(prices: pl.DataFrame, dest: Path, manifest: dict) -> None:
-    """Write prices.parquet then manifest.json into `dest`, each atomically."""
+def write(df: pl.DataFrame, dest: Path, manifest: dict, file: str = "prices.parquet") -> None:
+    """Write `file` then manifest.json into `dest`, each atomically.
+
+    `manifest` carries the core fields except the ones written here (`file`, `rows`, `sha256`).
+    """
+    if missing := sorted(CORE - {"file", "rows", "sha256"} - manifest.keys()):
+        raise ValueError(f"manifest for {dest} lacks {missing}")
     dest.mkdir(parents=True, exist_ok=True)
-    tmp = dest / "prices.parquet.tmp"
-    prices.write_parquet(tmp)
+    tmp = dest / f"{file}.tmp"
+    df.write_parquet(tmp)
     sha = hashlib.sha256(tmp.read_bytes()).hexdigest()
-    os.replace(tmp, dest / "prices.parquet")
+    os.replace(tmp, dest / file)
     tmp = dest / "manifest.json.tmp"
-    tmp.write_text(json.dumps({**manifest, "rows": prices.height, "sha256": sha}, indent=2))
+    full = {**manifest, "file": file, "rows": df.height, "sha256": sha}
+    tmp.write_text(json.dumps(full, indent=2))
     os.replace(tmp, dest / "manifest.json")
+
+
+def open(dest: Path) -> tuple[pl.LazyFrame, dict]:
+    """Read a dataset folder: its data, lazily, and its manifest."""
+    path = dest / "manifest.json"
+    if not path.exists():
+        raise FileNotFoundError(f"{path} missing; rebuild the dataset")
+    manifest = json.loads(path.read_text())
+    if missing := sorted(CORE - manifest.keys()):
+        raise ValueError(f"{path} lacks {missing}; rebuild the dataset")
+    return pl.scan_parquet(dest / manifest["file"]), manifest
 
 
 def load(
     root: Path, universe: str, bar: str, start: date | None = None, end: date | None = None
 ) -> pl.LazyFrame:
-    """Lazily scan a dataset, optionally filtered to bar dates in [start, end]."""
-    lf = pl.scan_parquet(root / universe / bar / "prices.parquet")
+    """Lazily scan a price dataset, optionally filtered to bar dates in [start, end]."""
+    lf, _ = open(root / universe / bar)
     day = pl.col("timestamp").dt.date()
     if start:
         lf = lf.filter(day >= start)

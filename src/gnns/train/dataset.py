@@ -47,7 +47,7 @@ def to_data(
 ) -> Data:
     """Select model columns, normalize them, and attach labels; nodes are never dropped."""
     cols = _indices(s.feature_names, node_cols, "node")
-    x = normalize(s.x[:, cols], s.node_type, s.feature_owner[cols], how)
+    x = normalize(s.x[:, cols], s.node_type, s.feature_owner[cols], how, s.feature_prescaled[cols])
     edge_attr = s.edge_attr[:, _indices(s.edge_attr_names, edge_cols, "edge")]
 
     fwd = (
@@ -71,13 +71,21 @@ def to_data(
     )
 
 
-def normalize(x: np.ndarray, node_type: np.ndarray, owner: np.ndarray, how: str) -> np.ndarray:
-    """Scale each column across the nodes of the type that owns it, at one t."""
+def normalize(
+    x: np.ndarray,
+    node_type: np.ndarray,
+    owner: np.ndarray,
+    how: str,
+    prescaled: np.ndarray | None = None,
+) -> np.ndarray:
+    """Scale each column across the nodes of the type that owns it, at one t.
+    Columns marked `prescaled` (the builder already scaled them) pass through unchanged."""
     if how not in _SCALERS:
         raise ValueError(f"normalize must be one of {sorted(_SCALERS)}, got {how!r}")
+    scale = ~prescaled if prescaled is not None else np.ones(len(owner), dtype=bool)
     out = x.copy()
     for t in np.unique(owner):
-        block = np.ix_(node_type == t, owner == t)
+        block = np.ix_(node_type == t, (owner == t) & scale)
         if out[block].size:
             out[block] = np.apply_along_axis(_SCALERS[how], 0, x[block])
     return out

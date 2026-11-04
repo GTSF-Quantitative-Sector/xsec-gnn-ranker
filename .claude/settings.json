@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Read docs/PLAN.md to see current pipeline status before starting work. After each commit, or before ending the session, update docs/PLAN.md to reflect any progress.'"
+            "command": "python scripts/issue_check.py session"
           }
         ]
       }

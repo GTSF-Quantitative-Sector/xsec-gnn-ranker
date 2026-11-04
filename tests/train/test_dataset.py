@@ -45,6 +45,19 @@ def test_normalizes_within_each_node_type_and_keeps_column_blocks():
     assert d["x"].tolist() == [[-1, -1, 0], [1, 1, 0], [0, 0, 0]]
 
 
+def test_prescaled_columns_pass_through_while_the_rest_are_ranked():
+    # mom_20 is the same for both equities (e.g. a macro value copied onto each node):
+    # ranking would erase it to 0, so the builder marks it prescaled.
+    x = np.array([[0.7, 0.2, 0], [0.7, 0.4, 0], [0, 0, 78.2]], dtype=np.float32)
+    s = _snapshot(x=x, feature_prescaled=np.array([True, False, False]))
+    d = to_data(s, None, COLS, [], "rank")
+    assert d["x"].flatten().tolist() == pytest.approx([0.7, -1, 0, 0.7, 1, 0, 0, 0, 0])
+    # Column selection keeps each column's flag.
+    assert to_data(s, None, ["vol_20", "mom_20"], [], "rank")["x"][:, 1].tolist() == (
+        pytest.approx([0.7, 0.7, 0.0])
+    )
+
+
 def test_labels_and_mask_keep_every_node():
     s = _snapshot()
     d = to_data(s, _labels(s, {"AAPL": 0.02}), COLS, [], "none")
