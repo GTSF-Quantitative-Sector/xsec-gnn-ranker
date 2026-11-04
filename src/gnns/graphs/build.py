@@ -6,11 +6,13 @@ from gnns.config import ROOT
 from gnns.data import features, store
 from gnns.data.snapshot import GraphSnapshot
 from gnns.graphs.base import GraphBuilder
+from gnns.graphs.macro import MacroGraphBuilder
 from gnns.graphs.sector_etf import SectorETFCorrelationBuilder
 
 log = logging.getLogger(__name__)
 BUILDERS: dict[str, type[GraphBuilder]] = {
     "sector_etf_correlation": SectorETFCorrelationBuilder,
+    "macro_sensitivity": MacroGraphBuilder,
 }
 
 

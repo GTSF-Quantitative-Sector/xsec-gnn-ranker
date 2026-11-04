@@ -168,6 +168,7 @@ Available constructions:
 | `graph:` | What it is | Doc |
 | :-- | :-- | :-- |
 | `sector_etf_corr` | 11 sector ETFs, edges = rolling return correlation; exercises the pipeline | [docs/graphs/sector_etf_corr.md](docs/graphs/sector_etf_corr.md) |
+| `macro_sensitivity` | sector ETFs + 5 macro nodes (rates, credit, VIX, oil, gold), edges = rolling ridge betas; needs a macro dataset | [docs/graphs/macro_sensitivity.md](docs/graphs/macro_sensitivity.md) |
 
 1. The team default construction is `graph: <name>` in `config/config.yaml`. To try another
    one locally, put `graph: <name>` in `config/machine.yaml` (see Setup). Everything
