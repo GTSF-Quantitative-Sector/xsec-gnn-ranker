@@ -1,5 +1,9 @@
 # Macro-sensitivity: preliminary findings
 
+> Archived from the standalone pilot. Its code, README and config are at git tag [`macro-sensitivity-pilot`](https://github.com/GTSF-Quantitative-Sector/xsec-gnn-ranker/tree/macro-sensitivity-pilot/experiments/macro-sensitivity/upload-ready/experiments/macro-sensitivity); links below to those files refer to it.
+
+Historical milestone: this document records the original ridge-only experiment. Graph models and their development comparisons were subsequently added; see [graph findings](graph_findings.md) and [graph protocol](graph_protocol.md) for the current implementation.
+
 ## Research question
 
 Do statistically estimated macro sensitivities add predictive information about sector-ETF returns? A later experiment will test whether a graph model uses this information more effectively than non-graph models. No GNN has been implemented or evaluated yet.

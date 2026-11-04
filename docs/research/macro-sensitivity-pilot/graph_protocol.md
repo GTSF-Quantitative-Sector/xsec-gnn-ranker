@@ -1,5 +1,7 @@
 # Graph development protocol
 
+> Archived from the standalone pilot. Its code, README and config are at git tag [`macro-sensitivity-pilot`](https://github.com/GTSF-Quantitative-Sector/xsec-gnn-ranker/tree/macro-sensitivity-pilot/experiments/macro-sensitivity/upload-ready/experiments/macro-sensitivity); links below to those files refer to it.
+
 ## Scope
 
 This is the sector-ETF pilot of the macro-sensitivity graph. It tests whether estimated exposures help and whether graph/temporal processing improves on nonlinear non-graph baselines. It does not establish independence from disclosed firm exposures, compare against an implemented supply-chain graph, or reproduce the original THGNN study.

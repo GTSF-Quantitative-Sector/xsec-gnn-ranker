@@ -2,13 +2,21 @@
 
 import bisect
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import polars as pl
 
-from gnns.data.macro import FACTORS
+from gnns.data.macro import FACTORS, load_macro
 from gnns.data.snapshot import GraphSnapshot
 from gnns.graphs.base import GraphBuilder
+
+# Column kinds the builder scales itself from past data, so the Dataset leaves them as is:
+# macro state is identical on every equity at t (ranking would make it all 0), interactions
+# carry the size of the macro move, and the 5 macro nodes' context and one-hot identity
+# columns mean nothing ranked across factors. Betas and magnitudes differ by stock and
+# are ranked like the equity features.
+PRESCALED = ("macro_level_", "macro_change_", "interaction_", "context_", "factor_")
 
 
 def equity_macro_columns() -> list[str]:
@@ -20,6 +28,15 @@ def equity_macro_columns() -> list[str]:
 
 
 class MacroGraphBuilder(GraphBuilder):
+    @classmethod
+    def check_config(cls, cfg: dict) -> None:
+        if "macro" not in cfg["graph"].get("sources", {}):
+            raise ValueError("macro_sensitivity needs sources.macro in its graph file")
+
+    @classmethod
+    def load_sources(cls, root: Path, sources: dict) -> dict[str, tuple[pl.DataFrame, dict]]:
+        return {"macro": load_macro(root, sources["macro"])}
+
     def __init__(
         self,
         inputs: dict[str, pl.DataFrame],
@@ -168,6 +185,7 @@ class MacroGraphBuilder(GraphBuilder):
             feature_owner=np.r_[
                 np.zeros(eq_dim, dtype=np.int64), np.ones(len(node_names) - eq_dim, dtype=np.int64)
             ],
+            feature_prescaled=np.array([c.startswith(PRESCALED) for c in node_names]),
             edge_index=np.stack([src, dst]),
             edge_weight=np.abs(edge).reshape(-1).astype(np.float32),
             edge_type=np.tile(np.arange(5, dtype=np.int64), count),

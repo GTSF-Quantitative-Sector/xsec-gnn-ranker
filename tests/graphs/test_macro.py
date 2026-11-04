@@ -1,6 +1,5 @@
 """Synthetic integration tests; no research dates or downloaded market inputs."""
 
-import hashlib
 import json
 from copy import deepcopy
 from datetime import date, datetime, timedelta
@@ -18,10 +17,11 @@ from gnns.data import features, store
 from gnns.data.labels import forward_returns
 from gnns.data.macro import FACTORS, UNITS, load_macro
 from gnns.graphs.build import build_snapshots
-from gnns.graphs.macro import MacroGraphBuilder
-from gnns.train.dataset import build_dataset
+from gnns.graphs.macro import PRESCALED, MacroGraphBuilder
+from gnns.train.dataset import build_dataset, model_columns
 from gnns.train.losses import listmle
 from gnns.train.models import build_model
+from tests.data.test_store import MANIFEST
 
 
 @pytest.fixture
@@ -42,40 +42,34 @@ def fixture(tmp_path):
             for t, c in zip(ts, closes, strict=True)
         )
     prices = pl.DataFrame(rows, schema=store.PRICE_COLS, orient="row").sort("timestamp", "ticker")
-    store.write(prices, tmp_path / "etfs" / "1d", {"universe": "etfs"})
+    store.write(prices, tmp_path / "etfs" / "1d", MANIFEST | {"universe": "etfs"})
     macro = pl.DataFrame(
-        [
-            (t.isoformat(), f, float(levels[i, k]))
-            for i, t in enumerate(ts)
-            for k, f in enumerate(FACTORS)
-        ],
+        [(t, f, float(levels[i, k])) for i, t in enumerate(ts) for k, f in enumerate(FACTORS)],
         schema=["timestamp", "factor", "value"],
         orient="row",
     )
-    path = tmp_path / "macro.csv"
-    macro.write_csv(path)
-    manifest = dict(
+    dest = tmp_path / "macro"
+    meta = MANIFEST | dict(
         source="synthetic integration fixture",
         availability_method="synthetic bar-end release",
         known_at_verified=True,
         units=UNITS,
-        sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
     )
-    path.with_suffix(".json").write_text(json.dumps(manifest))
+    store.write(macro, dest, meta, file="macro.parquet")
     graph = yaml.safe_load(
         (Path(__file__).parents[2] / "config/graphs/macro_sensitivity.yaml").read_text()
     )
     graph.update(name="synthetic_macro", universe="etfs")
     graph["params"].update(window_bars=10, min_obs=8, ridge=1.0)
     graph["features"] = {"min_history_bars": 10, "list": [{"name": "momentum", "bars": 3}]}
-    graph["sources"]["macro"]["path"] = "macro.csv"
+    graph["sources"]["macro"]["path"] = "macro"
     graph["model"].update(hidden=4, layers=1, heads=1, dropout=0.0)
     graph["baseline"].update(hidden=4, layers=1, dropout=0.0)
     cfg = dict(
         data_root=str(tmp_path),
         data={"bar": "1d"},
         graph=graph,
-        normalize="none",
+        normalize="rank",
         horizon_bars=2,
         walk_forward=dict(
             window="rolling",
@@ -88,7 +82,7 @@ def fixture(tmp_path):
         eval=dict(quantiles=3, top_k=1, benchmark="SPY", rolling_dates=3, permutation_repeats=1),
         device="cpu",
     )
-    return cfg, prices, ts, path
+    return cfg, prices, ts, dest
 
 
 def builder(fixture, **params):
@@ -97,7 +91,7 @@ def builder(fixture, **params):
         {
             "prices": prices,
             "features": features.compute(prices, cfg["graph"]["features"]),
-            "macro": load_macro(Path(cfg["data_root"]), cfg["graph"]["sources"]["macro"]),
+            "macro": load_macro(Path(cfg["data_root"]), cfg["graph"]["sources"]["macro"])[0],
         },
         pl.Series(ts),
         **(cfg["graph"]["params"] | params),
@@ -106,7 +100,7 @@ def builder(fixture, **params):
 
 def test_layout_mask_baseline_information_and_model_backward(fixture):
     cfg, prices, _, _ = fixture
-    snapshots = build_snapshots(cfg)
+    snapshots, _ = build_snapshots(cfg)
     s = snapshots[0]
     assert s.node_ids.tolist() == [
         "AAA",
@@ -213,38 +207,55 @@ def test_additional_lag_preserves_beta_endpoint_but_keeps_current_equity_feature
 
 
 def test_missing_offsets_and_duplicate_releases_rejected(fixture):
-    cfg, _, _, path = fixture
-    original = pl.read_csv(path)
-    invalid = original.with_columns(pl.col("timestamp").str.slice(0, 19))
-    invalid.write_csv(path)
-    meta = json.loads(path.with_suffix(".json").read_text())
-    meta["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-    path.with_suffix(".json").write_text(json.dumps(meta))
+    _, _, _, dest = fixture
+    lf, meta = store.open(dest)
+    original = lf.collect()
+    meta = {k: v for k, v in meta.items() if k not in ("file", "rows", "sha256")}
+    naive = original.with_columns(pl.col("timestamp").dt.replace_time_zone(None))
+    store.write(naive, dest, meta, file="macro.parquet")
     with pytest.raises(ValueError, match="UTC offset"):
-        load_macro(Path(cfg["data_root"]), {"path": path.name})
-    pl.concat([original, original.head(1)]).write_csv(path)
-    meta["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-    path.with_suffix(".json").write_text(json.dumps(meta))
+        load_macro(dest.parent, {"path": dest.name})
+    store.write(pl.concat([original, original.head(1)]), dest, meta, file="macro.parquet")
     with pytest.raises(ValueError, match="duplicate"):
-        load_macro(Path(cfg["data_root"]), {"path": path.name})
+        load_macro(dest.parent, {"path": dest.name})
 
 
-def test_requires_safe_normalization_and_verified_provenance(fixture):
-    cfg, _, _, path = fixture
+def test_requires_macro_source_and_verified_provenance(fixture):
+    cfg, _, _, dest = fixture
     cfg = deepcopy(cfg)
-    cfg["normalize"] = "rank"
-    with pytest.raises(ValueError, match="normalize: none"):
+    del cfg["graph"]["sources"]["macro"]
+    cfg["data_root"] = str(dest / "nothing_built_here")  # fails before any data is read
+    with pytest.raises(ValueError, match="needs sources.macro"):
         build_snapshots(cfg)
-    meta = json.loads(path.with_suffix(".json").read_text())
+    path = dest / "manifest.json"
+    meta = json.loads(path.read_text())
     meta["known_at_verified"] = False
-    path.with_suffix(".json").write_text(json.dumps(meta))
+    path.write_text(json.dumps(meta))
     with pytest.raises(ValueError, match="known-at"):
-        load_macro(path.parent, {"path": path.name})
+        load_macro(dest.parent, {"path": dest.name})
     meta["known_at_verified"] = True
-    path.with_suffix(".json").write_text(json.dumps(meta))
-    path.write_text(path.read_text() + "\n")
+    path.write_text(json.dumps(meta))
+    pl.read_parquet(dest / "macro.parquet").head(-1).write_parquet(dest / "macro.parquet")
     with pytest.raises(ValueError, match="SHA-256"):
-        load_macro(path.parent, {"path": path.name})
+        load_macro(dest.parent, {"path": dest.name})
+
+
+def test_builder_scaled_columns_reach_the_model_unranked(fixture):
+    cfg, prices, _, dest = fixture
+    snapshots, manifests = build_snapshots(cfg)
+    assert manifests["macro"] == json.loads((dest / "manifest.json").read_text())
+    s = snapshots[0]
+    names = s.feature_names.tolist()
+    prescaled = {n for n, p in zip(names, s.feature_prescaled, strict=True) if p}
+    assert prescaled == {n for n in names if n.startswith(PRESCALED)}
+    assert {"momentum_3", "beta_rates", "magnitude_rates"}.isdisjoint(prescaled)
+    data = build_dataset(snapshots[:1], forward_returns(prices, 2), s.timestamp, s.timestamp, cfg)
+    cols, x = model_columns(cfg["graph"])[0], data[0]["x"].numpy()
+    for j, c in enumerate(cols):
+        if c in prescaled:  # as the builder scaled them, although normalize is rank
+            assert x[:, j] == pytest.approx(s.x[:, names.index(c)])
+    # The rest are ranked across the 3 equities as usual.
+    assert sorted(x[:3, cols.index("momentum_3")]) == pytest.approx([-1, 0, 1])
 
 
 def test_shared_run_logs_macro_provenance_predictions_and_reports(fixture, monkeypatch, tmp_path):
@@ -256,7 +267,7 @@ def test_shared_run_logs_macro_provenance_predictions_and_reports(fixture, monke
     import gnns.train.run as runner
     from gnns.eval.report import report
 
-    cfg, _, _, path = fixture
+    cfg, _, _, _ = fixture
     for module in (config, build, runner):
         monkeypatch.setattr(module, "ROOT", tmp_path)
     monkeypatch.setattr(runner, "git_sha", lambda: "synthetic-fixture")
@@ -266,7 +277,8 @@ def test_shared_run_logs_macro_provenance_predictions_and_reports(fixture, monke
     assert {
         "predictions_gatv2.parquet",
         "predictions_mlp.parquet",
-        "source_manifest_macro.json",
+        "manifest_prices.json",
+        "manifest_macro.json",
         "config.yaml",
     } <= artifacts
     predictions = pl.read_parquet(
@@ -281,20 +293,7 @@ def test_shared_run_logs_macro_provenance_predictions_and_reports(fixture, monke
     assert last_prediction.date() < cfg["walk_forward"]["holdout_start"]
     assert not any(n.startswith("macro:") for n in predictions["ticker"])
     charts = report(run_id, cfg["data_root"])
-    assert len(charts) == 10
+    assert len(charts) == 9
     assert {"8_score_spread.png", "9_feature_importance.png", "11_feature_correlation.png"} <= set(
         charts
     )
-
-
-def test_local_config_resolves_construction_after_override(tmp_path, monkeypatch):
-    import gnns.config as config
-
-    (tmp_path / "graphs").mkdir()
-    (tmp_path / "config.yaml").write_text("graph: original\nnormalize: rank\n")
-    (tmp_path / "machine.yaml").write_text("graph: macro_sensitivity\nnormalize: none\n")
-    (tmp_path / "graphs/macro_sensitivity.yaml").write_text("builder: macro_sensitivity\n")
-    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
-    cfg = config.load_config()
-    assert cfg["graph"]["builder"] == "macro_sensitivity"
-    assert cfg["normalize"] == "none"

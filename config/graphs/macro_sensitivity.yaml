@@ -2,7 +2,7 @@ builder: macro_sensitivity
 universe: sector_etfs
 sources:
   macro:
-    path: macro/known_at.csv
+    path: macro               # dataset folder under data_root (docs/graphs/macro_sensitivity.md)
 params:
   window_bars: 252
   min_obs: 200

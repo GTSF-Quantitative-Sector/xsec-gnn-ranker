@@ -1,5 +1,7 @@
 # GATv2 and temporal macro graph: development findings
 
+> Archived from the standalone pilot. Its code, README and config are at git tag [`macro-sensitivity-pilot`](https://github.com/GTSF-Quantitative-Sector/xsec-gnn-ranker/tree/macro-sensitivity-pilot/experiments/macro-sensitivity/upload-ready/experiments/macro-sensitivity); links below to those files refer to it.
+
 Implemented and evaluated October 12, 2026, using the existing September data cache. This supersedes the implementation status in the earlier ridge-only findings, not its historical results.
 
 ## Completed implementation
