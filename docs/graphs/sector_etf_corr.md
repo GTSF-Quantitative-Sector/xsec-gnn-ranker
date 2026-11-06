@@ -32,9 +32,14 @@ relational signal.
 
 ## Params
 
-| Param | Meaning |
-| :-- | :-- |
-| `window_bars` | returns per correlation window. Must be `<= features.min_history_bars`, which `build_snapshots` checks. |
+The graph file is laid out in sections: §1 construction (fixed), §2 shared data side
+(`params`, `features`, `extra_model_features`), §3 GNN (`model`, `model_edge_attrs`), §4
+baseline, §5 `sweep:`. What `gnns sweep` does with each: `docs/RESEARCH_PROTOCOL.md`,
+"Settings: tuned vs fixed". The Sweep column says whether a param is a tuning choice.
+
+| Param | Meaning | Sweep |
+| :-- | :-- | :-- |
+| `window_bars` | returns per correlation window. Must be `<= features.min_history_bars`, which `build_snapshots` checks (`gnns sweep` raises `min_history_bars` to cover it). | tunable |
 
 ## Limitations
 

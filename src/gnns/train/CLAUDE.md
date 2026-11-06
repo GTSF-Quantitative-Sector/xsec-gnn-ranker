@@ -18,6 +18,32 @@ loop. This layer reads machine settings.
   final held-out evaluation.
 - Validation is for early stopping and tuning only (`docs/RESEARCH_PROTOCOL.md`).
 
+## Run and sweep decisions
+
+- `run.py` is split along its seams: `build(cfg) -> Built` (snapshots, labels, search
+  folds, per-fold datasets, manifests), `train(built, role, cfg, device) -> Trained` (one
+  model, `model` or `baseline`, on every fold; keeps each fold's best-epoch model on CPU),
+  `importance`, `summarize(results, cfg, test=)` and `log_run(..., predictions=,
+  parent_run_id=)`. `run()` (`gnns train`) calls them for both models.
+- Training settings per model = config.yaml `train:` with the graph file's
+  `<role>.train:` on top (`train_settings`). `seed` is shared and rejected there;
+  `build_model` ignores the `train` key.
+- `sweep.py` (`gnns sweep`, issue #9): stage 1 trains only the GNN on every `model_grid`
+  combination x seed, building once per distinct data-side (§2) setting; stage 2 trains
+  only the baseline on every `baseline_grid` combination x seed on the stage-1 winner's
+  `Built` (no rebuild). Winner = highest mean `val_ic` over seeds, ties to the earlier
+  combination in grid order (`better`). Allowed keys per grid: the table in
+  `docs/RESEARCH_PROTOCOL.md`, "Settings: tuned vs fixed" (`check_key`).
+- Keep-best-so-far holds the winner's `Trained` per seed (predictions and models), so the
+  final runs (one per seed, both winners) need no retraining; permutation importance is
+  computed only there, from the kept models. Stage runs log validation metrics only.
+- `features.min_history_bars` is set for every combination to the largest any
+  `model_grid` combination needs (`required_history`, never below the file value), so all
+  are scored on the same folds and node sets. `required_history` reads a builder's
+  `lookbacks()` by constructing it on empty inputs, so builders must not touch data in
+  `__init__` (both current builders only store and validate params).
+- Only the main process writes MLflow; jobs run one after another (parallelism: #17).
+
 ## Dataset decisions
 
 - `dataset.build_dataset(snapshots, labels, start, end, cfg) -> list[Data]` for one

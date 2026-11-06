@@ -83,10 +83,12 @@ MODELS: dict[str, Callable[..., Ranker]] = {
 
 
 def build_model(spec: dict, sample: Data) -> Ranker:
-    """Instantiate `spec["name"]` with the other keys as arguments, sized from one sample."""
+    """Instantiate `spec["name"]` with the other keys as arguments, sized from one sample.
+    `train` holds the model's training overrides (`gnns.train.run.train_settings`), not
+    model arguments."""
     if spec["name"] not in MODELS:
         raise ValueError(f"unknown model {spec['name']!r}; valid: {sorted(MODELS)}")
-    params = {k: v for k, v in spec.items() if k != "name"}
+    params = {k: v for k, v in spec.items() if k not in ("name", "train")}
     x: Tensor = sample.x  # type: ignore[assignment]
     attr: Tensor = sample.edge_attr  # type: ignore[assignment]
     return MODELS[spec["name"]](x.shape[1], 1 + attr.shape[1], **params)
