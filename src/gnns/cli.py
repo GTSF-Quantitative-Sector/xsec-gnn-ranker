@@ -14,6 +14,9 @@ def main() -> None:
     sub.add_parser("build-data", help="fetch, adjust, validate and write the configured datasets")
     sub.add_parser("build-graphs", help="build the configured graph's snapshots and summarize them")
     sub.add_parser("train", help="train model + baseline on search folds; log metrics to MLflow")
+    sub.add_parser(
+        "sweep", help="grid-search the GNN, then the baseline, on search folds (graph sweep:)"
+    )
     rep = sub.add_parser("report", help="make evaluation charts for one MLflow run")
     rep.add_argument("run_id", help="MLflow run id, as printed by gnns train or shown in mlflow ui")
     bt = sub.add_parser("backtest", help="backtest one MLflow run's predictions net of costs")
@@ -39,6 +42,8 @@ def main() -> None:
         print(f"MLflow run {run_id}")
         _after_run(run_id, cfg)
         print("browse runs: mlflow ui --backend-store-uri sqlite:///mlflow.db")
+    elif args.command == "sweep":
+        _sweep(cfg)
     elif args.command == "report":
         _report(args.run_id, cfg)
     elif args.command == "backtest":
@@ -47,7 +52,8 @@ def main() -> None:
 
 def _after_run(run_id: str, cfg: dict) -> None:
     """What every command that produces a run does next: backtest it, then chart it.
-    `gnns train` calls it on its run; the future `gnns sweep` on its best run only."""
+    `gnns train` calls it on its run; `gnns sweep` on its final runs only, so test-period
+    results never drive selection."""
     from gnns.eval.backtest_run import BenchmarksMissing
 
     try:
@@ -55,6 +61,29 @@ def _after_run(run_id: str, cfg: dict) -> None:
     except BenchmarksMissing as e:
         print(f"backtest skipped: {e}")
     _report(run_id, cfg)
+
+
+def _sweep(cfg: dict) -> None:
+    from gnns.train.sweep import frozen_yaml, sweep  # torch and mlflow load only here
+
+    result = sweep(cfg)
+    s = result.summary
+    print(f"MLflow sweep run {result.parent_run_id}")
+    for key in ("stage_1", "stage_2"):
+        st = s[key]
+        print(
+            f"  {st['role']} ({st['label']}): best of {st['combinations']} combinations "
+            f"[{st['winner_name']}], val IC {st['val_ic']:.4f} "
+            f"(sd {st['val_ic_sd_over_seeds']:.4f} over seeds), "
+            f"best in {st['folds_won']} of {st['folds']} folds"
+        )
+    print(f"  val lift {s['val_lift']:.4f}, test lift {s['test_lift']:.4f} (mean over seeds)")
+    for run_id in result.final_run_ids:
+        print(f"final run {run_id}")
+        _after_run(run_id, cfg)
+    print("\nPaste into the graph file to freeze the tuned values:\n")
+    print(frozen_yaml(result.frozen, cfg["graph"]["name"], result.parent_run_id))
+    print("browse runs: mlflow ui --backend-store-uri sqlite:///mlflow.db")
 
 
 def _backtest(run_id: str, cfg: dict) -> None:

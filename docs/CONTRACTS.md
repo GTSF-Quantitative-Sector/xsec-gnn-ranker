@@ -131,7 +131,8 @@ Each kind of dataset adds its own fields. Price datasets:
 
 Every pipeline run logs to MLflow the manifest of each dataset it opened, as read when it
 was opened (not re-read later), as `manifest_<name>.json`: `gnns train` logs `prices` and
-each of the builder's sources; `gnns backtest` logs `backtest/manifest_benchmarks.json`.
+each of the builder's sources; `gnns sweep` logs the same on every child run and on its
+parent run; `gnns backtest` logs `backtest/manifest_benchmarks.json`.
 
 ## Labels
 

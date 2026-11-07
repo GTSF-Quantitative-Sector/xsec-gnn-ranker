@@ -21,13 +21,14 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
   open time: `prices` and each builder source), test IC metrics, `<model>_val_ic` (mean over
   folds of the kept epoch's validation IC: the metric to compare and select runs on;
   optimistic, so never reported as performance), training histories and predictions.
-  `gnns train` always saves predictions; dropping them for losing sweep
-  combinations is the future `gnns sweep`'s job (`docs/PLAN.md`).
-- Producers create a run (`train/run.py:run`, later `sweep`); consumers take a run id,
-  read its artifacts and attach results to it (`report.py`, `backtest_run.py`). Producers
-  never call consumers: `cli.py:_after_run` backtests and charts the run a command
-  produced (`gnns train`: its run; future `gnns sweep`: its best run only, so test-period
-  backtests never drive selection). `gnns report <id>` / `gnns backtest <id>` rerun one.
+  `gnns train` always saves predictions; `gnns sweep` (issue #9) saves them only on its
+  final runs, and its stage runs log validation metrics only.
+- Producers create a run (`train/run.py:run`, `train/sweep.py:sweep`); consumers take a
+  run id, read its artifacts and attach results to it (`report.py`, `backtest_run.py`).
+  Producers never call consumers: `cli.py:_after_run` backtests and charts the run a
+  command produced (`gnns train`: its run; `gnns sweep`: its final runs only, so
+  test-period backtests never drive selection). `gnns report <id>` / `gnns backtest <id>`
+  rerun one.
 - `report.py` downloads the run's artifacts, calls `make_charts`, and logs the PNGs to
   the same run, using the run's own saved config so charts match its training settings.
 - Permutation importance (`importance.py`) is computed inside `gnns train`, per fold on

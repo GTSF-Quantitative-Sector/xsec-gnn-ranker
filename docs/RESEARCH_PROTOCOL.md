@@ -16,18 +16,37 @@ Nothing may use information that was not known at the time it is used.
   before test so no training label ends after the next period starts.
 - Early stopping and hyperparameter choices use validation only, never test results.
 
-## Settings: tuned vs experiment-defining
+## Settings: tuned vs fixed
 
-| Setting | Role | How it is chosen |
-| :-- | :-- | :-- |
-| graph params (e.g. `window_bars`), feature windows, model params (lr, hidden size, heads, dropout) | tuning | grid search on search folds' validation, then frozen (below) |
-| `min_history_bars`, purge gap | derived | follow from the settings above (`>=` longest window; `horizon_bars + 1`) |
-| `horizon_bars` | defines the strategy | horizon experiment (below) |
-| `train_bars`, `val_bars`, `test_bars` | experiment design | fixed up front; sensitivity checks only |
-| held-out start | grading line | fixed up front; may move later as data grows, never earlier |
+`gnns sweep` runs two stages on the same seeds. Stage 1 tunes the GNN and the inputs both
+models share; stage 2 tunes the baseline with those shared inputs fixed at the stage-1
+winner, so it stays matched (same inputs, no graph). Each stage picks its winner by mean
+validation IC over seeds. Tuned values are then frozen in the graph file (below).
 
-Only the first row is ever grid-searched. Never pick a setting from another row by its
-test or held-out results.
+| Where | Settings | Role | Stage 1 (GNN) | Stage 2 (baseline) |
+| :-- | :-- | :-- | :-- | :-- |
+| graph file §2 | `params.*`, `features.*`, `extra_model_features` | shared data side | **swept** | fixed at stage-1 winner |
+| graph file §3 | `model.*`, `model.train.*`, `model_edge_attrs` | GNN | **swept** | not used |
+| graph file §4 | `baseline.*`, `baseline.train.*` | baseline | not used | **swept** |
+| graph file §2 | `features.min_history_bars` | derived (`>=` longest window) | set by the sweep | fixed at stage-1 winner |
+| graph file §1 | `builder`, `universe`, `sources` | defines the construction | fixed | fixed |
+| graph file §3–4 | `model.name`, `baseline.name` | architecture | fixed (separate sweeps) | fixed |
+| config.yaml | `horizon_bars` | defines the strategy | fixed (horizon experiment below) | fixed |
+| config.yaml | `walk_forward.*` (window, train/val/test bars) | experiment design | fixed (sensitivity checks only) | fixed |
+| config.yaml | `walk_forward.holdout_start` | grading line | fixed (may move later, never earlier) | fixed |
+| config.yaml | `data.*`, `normalize` | shared by every construction | fixed | fixed |
+| config.yaml | `train.*` | training defaults; overridden per model | fixed | fixed |
+| config.yaml | `train.seed` | noise, not a setting | `sweep.seeds`, averaged | same seeds |
+| config.yaml | `eval.*`, `backtest.*` | evaluation only | fixed | fixed |
+| derived | purge gap | `horizon_bars + 1` | fixed | fixed |
+
+The graph file's sections: §1 construction, §2 shared data side, §3 GNN, §4 baseline,
+§5 `sweep:`. Some builder params are controls or safety margins, not tuning choices, and
+stay out of grids even though they sit in §2 (e.g. the macro graph's
+`edge_mode: constant | shuffled`, `lag_bars`, `max_stale_bars`, `seed`); each graph doc
+marks them.
+
+Never pick a fixed setting by its test or held-out results.
 
 `horizon_bars` is both the label horizon and the spacing between snapshots: one snapshot
 (and one rebalance) every `horizon_bars` bars, so consecutive labels never overlap and each
@@ -87,6 +106,8 @@ Grid-searched settings are chosen once, from the search folds' average validatio
 frozen; model weights still retrain every fold. Prefer combinations that are good across
 most folds and neighboring values. Check how often the best combination changes across
 search folds: frequent changes mean differences are mostly noise, so pick a robust one.
+`gnns sweep` logs, per stage, how many folds its winner won (`summary.yaml`) and every
+combination's validation IC per fold and seed (`results.csv`) to check neighbors.
 
 ## Final held-out period
 

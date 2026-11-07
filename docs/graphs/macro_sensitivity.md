@@ -89,15 +89,19 @@ macro inputs, not beta signal versus a price-only model.
 
 ## Params
 
-| Param | Meaning |
-| :-- | :-- |
-| `window_bars` | returns per ridge regression window |
-| `min_obs` | complete observations required in the window |
-| `ridge` | ridge penalty |
-| `lag_bars` | additional bar lag after verified availability |
-| `max_stale_bars` | bars a macro value is carried forward |
-| `edge_mode` | `magnitude`, `signed`, `constant` or `shuffled` |
-| `seed` | seed for `shuffled` |
+Sections of the graph file and what `gnns sweep` does with each:
+`docs/RESEARCH_PROTOCOL.md`, "Settings: tuned vs fixed". The sweep accepts any of these
+params in `model_grid`; the Sweep column says which are tuning choices.
+
+| Param | Meaning | Sweep |
+| :-- | :-- | :-- |
+| `window_bars` | returns per ridge regression window (`>= min_obs`) | tunable; also sets `min_history_bars` (more history, fewer folds) |
+| `min_obs` | complete observations required in the window | tunable |
+| `ridge` | ridge penalty | tunable |
+| `lag_bars` | additional bar lag after verified availability | keep out: robustness check, and it moves the folds |
+| `max_stale_bars` | bars a macro value is carried forward | keep out: data hygiene |
+| `edge_mode` | `magnitude`, `signed`, `constant` or `shuffled` | `magnitude` vs `signed` only; `constant` and `shuffled` are placebo controls, run on purpose |
+| `seed` | seed for `shuffled` | keep out: not a setting |
 
 ## Limitations
 
