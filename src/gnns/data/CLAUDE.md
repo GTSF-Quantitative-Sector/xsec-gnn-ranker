@@ -11,7 +11,9 @@ and features (computed at `t` from bars `<= t`) already comply.
 Every dataset is a folder with one Parquet file and a `manifest.json` carrying the core
 fields (`docs/CONTRACTS.md`, "manifest.json"). Every read goes through `store.open` (or
 `store.load` for prices), which returns the manifest the caller logs. A source loader
-calls `store.open`, then adds only its own checks.
+calls `store.open`, then adds only its own checks. A source the pipeline builds has a
+fetch function registered by `kind` in `build.SOURCES`: it fetches and validates, never
+writes; `build()` writes every universe and source only after all of them validate.
 
 ## FeatureEngine decisions
 

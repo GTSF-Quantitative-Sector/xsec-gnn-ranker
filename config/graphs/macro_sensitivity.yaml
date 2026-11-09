@@ -2,7 +2,18 @@ builder: macro_sensitivity
 universe: sector_etfs
 sources:
   macro:
+    kind: macro               # gnns build-data builds it while this graph is selected
     path: macro               # dataset folder under data_root (docs/graphs/macro_sensitivity.md)
+    series:                   # Massive tickers; dividend-adjusted daily closes
+      rates: {ticker: IEF}    # 7-10y Treasuries (inverted below: yields up = positive)
+      credit: {ticker: HYG}   # high-yield corporates
+      vix:                    # short-term VIX futures; the note was replaced in 2019
+        stitch:
+          - {ticker: VXX, until: 2019-01-29}   # original note, matured
+          - {ticker: VXXB, until: 2019-05-01}  # replacement before it took the VXX name
+          - {ticker: VXX}
+      oil: {ticker: BNO}      # Brent futures
+      gold: {ticker: GLD}
 params:
   window_bars: 252
   min_obs: 200
@@ -11,6 +22,8 @@ params:
   max_stale_bars: 2
   edge_mode: magnitude   # magnitude | signed | constant | shuffled
   seed: 7
+  invert_factors: [rates]       # change = minus the series' return
+  level_factors: [oil, gold]    # get macro_level_* / context_level; others' prices trend
 features:
   min_history_bars: 252
   list:
@@ -21,9 +34,6 @@ features:
     - {name: volatility, bars: 63}
 # Both models see the same macro state, exposures and interactions on equity nodes.
 extra_model_features:
-  - macro_level_rates
-  - macro_level_credit
-  - macro_level_vix
   - macro_level_oil
   - macro_level_gold
   - macro_change_rates
