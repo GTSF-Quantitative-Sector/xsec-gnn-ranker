@@ -119,17 +119,21 @@ numbers are 2009-2026 daily data.
 
 ## Params
 
-| Param | Meaning |
-| :-- | :-- |
-| `window_bars` | returns per ridge regression window |
-| `min_obs` | complete observations required in the window |
-| `ridge` | ridge penalty |
-| `lag_bars` | additional bar lag after bar-end availability |
-| `max_stale_bars` | bars a macro value is carried forward |
-| `edge_mode` | `magnitude`, `signed`, `constant` or `shuffled` |
-| `seed` | seed for `shuffled` |
-| `invert_factors` | factors whose change is minus their return (`[rates]`); part of the factor definition, not tuned |
-| `level_factors` | factors that get `macro_level_*` and a nonzero `context_level` (`[oil, gold]`); not tuned |
+Sections of the graph file and what `gnns sweep` does with each:
+`docs/RESEARCH_PROTOCOL.md`, "Settings: tuned vs fixed". The sweep accepts any of these
+params in `model_grid`; the Sweep column says which are tuning choices.
+
+| Param | Meaning | Sweep |
+| :-- | :-- | :-- |
+| `window_bars` | returns per ridge regression window (`>= min_obs`) | tunable; also sets `min_history_bars` (more history, fewer folds) |
+| `min_obs` | complete observations required in the window | tunable |
+| `ridge` | ridge penalty | tunable |
+| `lag_bars` | additional bar lag after bar-end availability | keep out: robustness check, and it moves the folds |
+| `max_stale_bars` | bars a macro value is carried forward | keep out: data hygiene |
+| `edge_mode` | `magnitude`, `signed`, `constant` or `shuffled` | `magnitude` vs `signed` only; `constant` and `shuffled` are placebo controls, run on purpose |
+| `seed` | seed for `shuffled` | keep out: not a setting |
+| `invert_factors` | factors whose change is minus their return (`[rates]`) | keep out: part of the factor definition |
+| `level_factors` | factors that get `macro_level_*` and a nonzero `context_level` (`[oil, gold]`) | keep out: part of the factor definition |
 
 ## Limitations
 

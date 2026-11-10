@@ -217,12 +217,20 @@ Needs the construction's universe and the `benchmarks` universe built (`gnns bui
    `model_edge_attrs` if a builder adds columns the model should see.
 2. Shared settings in `config/config.yaml`: `train` (loss, learning rate, batch size,
    epochs, early-stopping patience, seed), `eval` (quantiles, permutation repeats,
-   rolling-IC window), `backtest` (see "Backtest") and `normalize`.
+   rolling-IC window), `backtest` (see "Backtest") and `normalize`. `train` holds the
+   defaults for both models; either model can override any of them except `seed` under
+   its own `train:` in the graph file:
+
+       model:
+         name: gatv2
+         hidden: 32
+         train: {lr: 0.003}     # the GNN only; the baseline keeps config.yaml's lr
 3. Run `gnns train`. It trains the model and the baseline on every search fold (held-out
    folds are never touched), stopping early on validation rank IC, scores each fold's
    test period, and logs an MLflow run: resolved config, git SHA, the manifest of each
    dataset it read (`manifest_prices.json`, plus one per extra source, as read at the start),
-   test IC metrics, validation IC (`<model>_val_ic`, the column to compare runs on),
+   test IC metrics, validation IC (`<model>_val_ic`, the column to compare runs on, and
+   `<model>_fold_val_ic` per fold),
    training histories and predictions. It then backtests the run (see "Backtest") and
    makes its charts (step 5), and prints the run id with a backtest summary.
 4. Browse runs with `mlflow ui --backend-store-uri sqlite:///mlflow.db` (open
@@ -234,6 +242,62 @@ Needs the construction's universe and the `benchmarks` universe built (`gnns bui
    quantile equity curves, score spread, permutation importance per
    input and for edges (`eval.permutation_repeats`), per-fold training curves with the
    no-information loss line, and the feature correlation matrix (search period).
+
+### Sweep (grid search)
+
+Needs what `gnns train` needs. `gnns sweep` tunes the construction in two stages, on the
+search folds only (held-out folds are never touched):
+
+- **Stage 1** trains the GNN on every combination in `model_grid`. That grid may sweep the
+  shared data side (`params`, `features`, `extra_model_features`) and the GNN (`model`,
+  including `model.train`, and `model_edge_attrs`).
+- **Stage 2** fixes the data side at the stage-1 winner, so the baseline stays matched (same
+  inputs, no graph), and trains the baseline on every combination in `baseline_grid`
+  (`baseline` keys only, including `baseline.train`).
+
+Each combination is trained once per seed. Each stage's winner is the combination with
+the highest mean validation IC over its seeds (ties: the earlier one in grid order). Which
+settings are tuned and which stay fixed, and why: [docs/RESEARCH_PROTOCOL.md](docs/RESEARCH_PROTOCOL.md),
+"Settings: tuned vs fixed".
+
+1. Add a `sweep:` block to the graph file. Keys are paths in that file; each lists the
+   values to try (a feature-window alternative is a whole `features.list`):
+
+       sweep:
+         seeds: [0, 1, 2]
+         model_grid:
+           params.window_bars: [20, 40, 60]
+           model.hidden: [16, 32]
+           model.train.lr: [0.003, 0.01]
+         baseline_grid:
+           baseline.hidden: [16, 32]
+           baseline.dropout: [0.0, 0.1]
+
+2. Run `gnns sweep`. Every combination is checked before anything trains; a key in the
+   wrong grid, a fixed setting (`horizon_bars`, `walk_forward`, `model.name`, ...) or a
+   path that doesn't exist stops it with the reason. `features.min_history_bars` is set to
+   the longest window any `model_grid` combination needs (never below the file's value),
+   so every combination is scored on the same folds; the sweep logs the fold count.
+3. It logs to MLflow, all under one parent run named `sweep`:
+   - one child run per stage combination and seed (tags `sweep.stage` 1 or 2,
+     `sweep.combo`, `sweep.seed`, `sweep.overrides`), with validation metrics only
+     (`<model>_val_ic` and `<model>_fold_val_ic` per fold): no test metrics or
+     predictions, so nothing tempts selection by test;
+   - one final run per seed (tag `sweep.stage: final`) pairing the two winners, made from
+     the trained models kept in memory (no retraining): predictions, test metrics,
+     training histories and permutation importance for both. `gnns sweep` backtests and
+     charts each one, like a `gnns train` run;
+   - on the parent: the resolved config and git SHA, dataset manifests, `sweep.yaml`,
+     `results.csv` (one row per stage x combination x seed x fold), `summary.yaml`
+     (each winner, its spread over seeds, how many folds it won, and the GNN-vs-baseline
+     lift per fold and seed) and `frozen.yaml`.
+4. Freeze the result: `gnns sweep` prints `frozen.yaml` (the winners' values plus the
+   derived `min_history_bars`), laid out like the graph file. Paste it into the graph
+   file so `gnns train` and the final held-out run use the tuned values. The sweep never
+   edits config itself.
+
+If a job fails, the sweep stops and the parent run is marked failed; finished child runs
+stay. There is no resume: rerunning starts over.
 
 ### Backtest
 

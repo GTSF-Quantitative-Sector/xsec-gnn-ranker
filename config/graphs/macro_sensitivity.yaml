@@ -1,3 +1,4 @@
+# --- 1. CONSTRUCTION, FIXED ---
 builder: macro_sensitivity
 universe: sector_etfs
 sources:
@@ -14,18 +15,24 @@ sources:
           - {ticker: VXX}
       oil: {ticker: BNO}      # Brent futures
       gold: {ticker: GLD}
+
+# --- 2. SHARED DATA SIDE: tuned in stage 1, then fixed for stage 2 ---
 params:
-  window_bars: 252
-  min_obs: 200
-  ridge: 10.0
-  lag_bars: 0             # Additional bar lag AFTER verified availability
-  max_stale_bars: 2
-  edge_mode: magnitude   # magnitude | signed | constant | shuffled
-  seed: 7
-  invert_factors: [rates]       # change = minus the series' return
-  level_factors: [oil, gold]    # get macro_level_* / context_level; others' prices trend
+  window_bars: 252        # tunable (>= min_obs)
+  min_obs: 200            # tunable
+  ridge: 10.0             # tunable
+  lag_bars: 0             # Additional bar lag after bar-end availability; robustness
+                          # check, not a tuning choice: keep out of grids
+  max_stale_bars: 2       # data hygiene, not a tuning choice: keep out of grids
+  edge_mode: magnitude    # magnitude | signed | constant | shuffled; constant and shuffled
+                          # are placebo controls, never picked by a grid
+  seed: 7                 # seed for edge_mode: shuffled; not a setting
+  invert_factors: [rates]     # change = minus the series' return; factor definition,
+                              # keep out of grids
+  level_factors: [oil, gold]  # get macro_level_* / context_level (others' prices trend);
+                              # factor definition, keep out of grids
 features:
-  min_history_bars: 252
+  min_history_bars: 252   # derived: gnns sweep raises it to the grid's longest window
   list:
     - {name: momentum, bars: 21}
     - {name: momentum, bars: 63}
@@ -63,15 +70,35 @@ extra_model_features:
   - factor_vix
   - factor_oil
   - factor_gold
-model_edge_attrs: [beta]
+
+# --- 3. GNN, tuned in stage 1 ---
 model:
   name: gatv2
   hidden: 32
   layers: 2
   heads: 2
   dropout: 0.1
+  train: {}               # this model's overrides of config.yaml train: (not seed)
+model_edge_attrs: [beta]
+
+# --- 4. BASELINE, tuned in stage 2 ---
 baseline:
   name: mlp
   hidden: 32
   layers: 2
   dropout: 0.1
+  train: {}               # this model's overrides of config.yaml train: (not seed)
+
+# --- 5. SWEEP (gnns sweep) ---
+# Keys are paths in this file. Which section each grid may sweep:
+# docs/RESEARCH_PROTOCOL.md, "Settings: tuned vs fixed".
+sweep:
+  seeds: [0, 1, 2]
+  model_grid:             # sections 2 and 3
+    params.ridge: [1.0, 10.0, 100.0]
+    model.hidden: [16, 32]
+    model.train.lr: [0.003, 0.01]
+  baseline_grid:          # section 4
+    baseline.hidden: [16, 32]
+    baseline.dropout: [0.0, 0.1]
+    baseline.train.lr: [0.003, 0.01]

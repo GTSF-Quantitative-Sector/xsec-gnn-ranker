@@ -18,13 +18,14 @@ walk_forward:
   test_bars: 252            # ≈ 1 year; also the step between folds
   holdout_start: 2024-01-01 # shared by every construction; may move later, never earlier
 
-train:
+train:                      # defaults for both models; each may override any key but seed
+                            # under its own train: in the graph file (never swept here)
   loss: listmle             # listmle
   lr: 0.01                  # 0.001 left GATv2 stuck at its flat start (planted-signal tests)
   batch_size: 16            # snapshots per gradient step
   max_epochs: 100
   patience: 20              # epochs without a better validation IC before stopping
-  seed: 0
+  seed: 0                   # shared by both models; gnns sweep uses sweep.seeds instead
 
 eval:
   quantiles: 11             # score buckets for the cascade (11 = one per sector ETF)
