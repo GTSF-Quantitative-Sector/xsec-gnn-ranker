@@ -102,3 +102,24 @@ construction and experiment so all are graded on the same years.
 - Sized from IC precision: the mean IC's standard error ≈ σ_IC / √(dates). On sector_etfs
   it gives ≈2.5 years (≈125 weekly dates, test periods 2024, 2025, 2026 so far),
   enough to detect a mean IC ≈ 0.05 across 11 names.
+
+## Future experiments
+
+Candidates, not yet scheduled. Each follows the rules above (search folds only, several
+seeds, held-out period untouched).
+
+- **Macro volatility factor: VXX vs spot VIX on daily data.** `macro_sensitivity` uses
+  stitched VXX (short-term VIX futures, from Massive) as its volatility factor, so the same
+  series works at any bar size. On daily bars, Cboe's official VIX history (free, daily,
+  from 1990) is a viable alternative and also supplies a true volatility level, which VXX
+  cannot (its price decays with the futures roll). Compare the two factor definitions on
+  the same folds and seeds: graph lift, IC, and whether a VIX level feature adds anything.
+  A pre-study found daily VXX returns correlate 0.89 with VIX % changes and give a
+  median 0.95 cross-sectional rank agreement in `beta_vix` across the sector ETFs.
+- **Macro rates factor: IEF vs the 10-year yield on daily data.** `macro_sensitivity` uses
+  minus IEF's daily return (7-10y Treasuries), which works at any bar size and is known at
+  the close. On daily bars, Massive's Treasury yields endpoint gives the 10-year yield
+  itself (same values as FRED `DGS10`), dated but without a time, so it needs a stated
+  availability rule (e.g. known at the next bar's close) and supplies a true yield level.
+  Compare the two the same way. IEF's daily return correlates 0.96 with the negative
+  10-year yield change.

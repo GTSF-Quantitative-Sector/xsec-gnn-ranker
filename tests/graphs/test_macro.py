@@ -233,11 +233,35 @@ def test_requires_macro_source_and_verified_provenance(fixture):
     path.write_text(json.dumps(meta))
     with pytest.raises(ValueError, match="known-at"):
         load_macro(dest.parent, {"path": dest.name})
-    meta["known_at_verified"] = True
+    meta |= {"known_at_verified": True, "units": {**UNITS, "rates": "percent"}}
     path.write_text(json.dumps(meta))
-    pl.read_parquet(dest / "macro.parquet").head(-1).write_parquet(dest / "macro.parquet")
-    with pytest.raises(ValueError, match="SHA-256"):
+    with pytest.raises(ValueError, match="units"):
         load_macro(dest.parent, {"path": dest.name})
+
+
+def test_levels_only_for_level_factors_and_inverted_factor_flips_sign(fixture):
+    t = fixture[2][40]
+    s = builder(fixture).build(t)  # graph file: invert rates, levels for oil and gold
+    names = s.feature_names.tolist()
+    assert [n for n in names if n.startswith("macro_level_")] == [
+        "macro_level_oil",
+        "macro_level_gold",
+    ]
+    ctx = names.index("context_level")
+    ids = s.node_ids.tolist()
+    for f in FACTORS:
+        row = s.x[ids.index(f"macro:{f}"), ctx]
+        assert (row != 0) if f in ("oil", "gold") else (row == 0)
+    plain = builder(fixture, invert_factors=[]).build(t)
+    for kind in ("macro_change", "beta"):
+        k = names.index(f"{kind}_rates")
+        assert s.x[:3, k] == pytest.approx(-plain.x[:3, k], abs=1e-6)
+        k = names.index(f"{kind}_credit")
+        assert s.x[:3, k] == pytest.approx(plain.x[:3, k], abs=1e-6)
+    every = builder(fixture, level_factors=list(FACTORS)).build(t)
+    assert sum(n.startswith("macro_level_") for n in every.feature_names) == 5
+    with pytest.raises(ValueError, match="level_factors"):
+        builder(fixture, level_factors=["copper"])
 
 
 def test_builder_scaled_columns_reach_the_model_unranked(fixture):

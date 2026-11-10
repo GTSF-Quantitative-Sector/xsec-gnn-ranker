@@ -19,11 +19,12 @@ from gnns.graphs.base import GraphBuilder
 PRESCALED = ("macro_level_", "macro_change_", "interaction_", "context_", "factor_")
 
 
-def equity_macro_columns() -> list[str]:
+def equity_macro_columns(level_factors: tuple[str, ...] = FACTORS) -> list[str]:
+    """Equity-owned macro columns; `macro_level_*` only for `level_factors`."""
     return [
         f"{kind}_{f}"
         for kind in ("macro_level", "macro_change", "beta", "magnitude", "interaction")
-        for f in FACTORS
+        for f in (level_factors if kind == "macro_level" else FACTORS)
     ]
 
 
@@ -49,6 +50,8 @@ class MacroGraphBuilder(GraphBuilder):
         max_stale_bars: int = 2,
         edge_mode: str = "magnitude",
         seed: int = 7,
+        invert_factors: list[str] | tuple[str, ...] = ("rates",),
+        level_factors: list[str] | tuple[str, ...] = ("oil", "gold"),
     ) -> None:
         if window_bars < 2 or not 2 <= min_obs <= window_bars or ridge <= 0:
             raise ValueError("invalid macro regression window, minimum or ridge")
@@ -58,9 +61,15 @@ class MacroGraphBuilder(GraphBuilder):
             or edge_mode not in {"magnitude", "signed", "constant", "shuffled"}
         ):
             raise ValueError("invalid lag, staleness or edge mode")
+        if not {*invert_factors, *level_factors} <= set(FACTORS):
+            raise ValueError(f"invert_factors and level_factors must be among {list(FACTORS)}")
         self.window_bars, self.min_obs, self.ridge = window_bars, min_obs, ridge
         self.lag_bars, self.max_stale_bars = lag_bars, max_stale_bars
         self.edge_mode, self.seed = edge_mode, seed
+        # Factor order, not config order, so columns are stable.
+        self.level_factors = tuple(f for f in FACTORS if f in level_factors)
+        self._level = np.array([FACTORS.index(f) for f in self.level_factors], dtype=np.int64)
+        self._sign = np.array([-1.0 if f in invert_factors else 1.0 for f in FACTORS])
         super().__init__(inputs, axis)
 
     def lookbacks(self) -> dict[str, int | None]:
@@ -69,13 +78,14 @@ class MacroGraphBuilder(GraphBuilder):
     def build_at(self, t: datetime, inputs: dict[str, pl.DataFrame]) -> GraphSnapshot:
         feats = inputs["features"].sort("ticker")
         names = [c for c in feats.columns if c not in ("timestamp", "ticker")]
+        macro_cols = equity_macro_columns(self.level_factors)
         node_names = (
             names
-            + equity_macro_columns()
+            + macro_cols
             + ["context_level", "context_change"]
             + [f"factor_{f}" for f in FACTORS]
         )
-        eq_dim = len(names) + 25
+        eq_dim = len(names) + len(macro_cols)
         axis = self._axis.filter(self._axis <= t).tail(self.window_bars + self.lag_bars + 1)
         n = len(axis)
         levels = np.full((n, 5), np.nan)
@@ -95,12 +105,11 @@ class MacroGraphBuilder(GraphBuilder):
                     age = self._axis.search_sorted(stamp) - self._axis.search_sorted(event_ts[pos])
                     if age <= self.max_stale_bars:
                         levels[j, k] = values[pos]
-        delta = np.diff(levels, axis=0)
-        delta[:, :2] *= 100
-        for k in (3, 4):
-            if np.any(levels[:, k][np.isfinite(levels[:, k])] <= 0):
-                raise ValueError("oil and gold must be positive for fractional changes")
-            delta[:, k] = levels[1:, k] / levels[:-1, k] - 1
+        if np.any(levels[np.isfinite(levels)] <= 0):
+            raise ValueError("macro prices must be positive for fractional changes")
+        # Every factor is a price series; invert_factors flip the sign (rates: IEF falls
+        # when yields rise, so minus its return keeps "yields up" positive).
+        delta = (levels[1:] / levels[:-1] - 1) * self._sign
         stop = n - self.lag_bars - 1
         lo = max(0, stop - self.window_bars)
         xreg = delta[lo:stop]
@@ -134,11 +143,12 @@ class MacroGraphBuilder(GraphBuilder):
                 # Macro scaling uses past available macro data only, common across equities.
                 common = np.isfinite(xreg).all(axis=1)
                 csd = xreg[common].std(axis=0)
-                h = history[np.isfinite(history).all(axis=1)]
+                h = history[np.isfinite(history).all(axis=1)][:, self._level]
                 hsd = h.std(axis=0)
                 if np.any(csd < 1e-12) or np.any(hsd < 1e-12):
                     continue
-                standardized = ((current - h.mean(axis=0)) / hsd, change / csd)
+                lev = (current[self._level] - h.mean(axis=0)) / hsd
+                standardized = (lev, change / csd)
                 chosen.append(row)
                 betas.append(beta)
         count = len(chosen)
@@ -153,9 +163,12 @@ class MacroGraphBuilder(GraphBuilder):
                     [row[name] for name in names], lev, chg, b[i], np.abs(b[i]), b[i] * chg
                 ]
             # Context nodes sorted by factor ID; explicit identity survives shared encoders.
+            # Factors without a level get context_level 0; the one-hot tells them apart.
+            context_level = np.zeros(5)
+            context_level[self._level] = lev
             for j, f in enumerate(sorted(FACTORS)):
                 k = FACTORS.index(f)
-                x[count + j, eq_dim : eq_dim + 2] = [lev[k], chg[k]]
+                x[count + j, eq_dim : eq_dim + 2] = [context_level[k], chg[k]]
                 x[count + j, eq_dim + 2 + k] = 1
         src = np.array(
             [count + sorted(FACTORS).index(f) for _ in chosen for f in FACTORS], dtype=np.int64

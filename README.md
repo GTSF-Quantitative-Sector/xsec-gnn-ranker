@@ -149,6 +149,13 @@ and dividends as of the build date, so every build re-downloads the full range. 
 are validated before any is written; if one fails, the build stops with a list of problems
 and leaves every existing dataset untouched.
 
+`gnns build-data` also builds the extra datasets of the **selected** construction (`graph:`,
+after `config/machine.yaml` overrides): the `sources:` entries in its graph file that name a
+`kind`, over the same date range, into `<data_root>/<path>/`. Other constructions' datasets
+are not built. For `macro_sensitivity`, that is `<data_root>/macro/` (Massive series listed
+in its graph file; see [docs/graphs/macro_sensitivity.md](docs/graphs/macro_sensitivity.md)).
+They are validated together with the universes, so a failure in either writes nothing.
+
 Every dataset, including a construction's extra sources, is a folder with its data file and
 one `manifest.json` (source, file, rows, sha256, build time, git SHA). **Datasets built
 before the manifest gained `source` and `file` must be rebuilt once:** run `gnns build-data`
@@ -161,14 +168,14 @@ polars `LazyFrame` of prices; `gnns.data.store.open(folder)` returns any dataset
 ### Build graph snapshots
 
 Needs the construction's universe built first (`gnns build-data`), plus any extra datasets
-its doc lists.
+its doc lists (built by the same command while the construction is selected).
 
 Available constructions:
 
 | `graph:` | What it is | Doc |
 | :-- | :-- | :-- |
 | `sector_etf_corr` | 11 sector ETFs, edges = rolling return correlation; exercises the pipeline | [docs/graphs/sector_etf_corr.md](docs/graphs/sector_etf_corr.md) |
-| `macro_sensitivity` | sector ETFs + 5 macro nodes (rates, credit, VIX, oil, gold), edges = rolling ridge betas; needs a macro dataset | [docs/graphs/macro_sensitivity.md](docs/graphs/macro_sensitivity.md) |
+| `macro_sensitivity` | sector ETFs + 5 macro nodes (rates, credit, VIX, oil, gold), edges = rolling ridge betas; its macro dataset is built by `gnns build-data` while selected | [docs/graphs/macro_sensitivity.md](docs/graphs/macro_sensitivity.md) |
 
 1. The team default construction is `graph: <name>` in `config/config.yaml`. To try another
    one locally, put `graph: <name>` in `config/machine.yaml` (see Setup). Everything
