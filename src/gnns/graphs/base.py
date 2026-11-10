@@ -31,7 +31,8 @@ class GraphBuilder(ABC):
         """Extra point-in-time inputs beyond prices and features, from the graph file's
         `sources:`, each with the manifest it was opened with (`gnns.data.store.open`).
 
-        `root` is the data root. Loaders live in `gnns.data`; this method calls them.
+        `root` is the data root. Loaders live in `gnns.data`; this method calls them. A
+        source with a `kind` is built by `gnns build-data` (`gnns.data.build.SOURCES`).
         """
         return {}
 

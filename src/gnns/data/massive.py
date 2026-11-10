@@ -31,11 +31,12 @@ def _get(path: str, params: dict) -> list[dict]:
     return results
 
 
-def daily_bars(ticker: str, start: date, end: date) -> pl.DataFrame:
-    """Split-adjusted daily bars, stamped 16:00 ET (bar end, per CONTRACTS.md)."""
+def daily_bars(ticker: str, start: date, end: date, adjusted: bool = True) -> pl.DataFrame:
+    """Daily bars, split-adjusted unless `adjusted=False`, stamped 16:00 ET (bar end, per
+    CONTRACTS.md)."""
     rows = _get(
         f"/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
-        {"adjusted": "true", "sort": "asc", "limit": 50000},
+        {"adjusted": str(adjusted).lower(), "sort": "asc", "limit": 50000},
     )
     schema = {c: pl.Float64 for c in "ohlcv"} | {"t": pl.Int64}
     return pl.DataFrame(rows, schema=schema).select(

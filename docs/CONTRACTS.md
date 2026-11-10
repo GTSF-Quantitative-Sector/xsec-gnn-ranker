@@ -55,7 +55,14 @@ universes, and never appear in a construction's list (every universe ticker is a
       manifest.json
 
 A construction-specific source is a folder under the data root, named in its graph file's
-`sources:` (e.g. `data/macro/` with `macro.parquet` and `manifest.json`).
+`sources:` (e.g. `data/macro/` with `macro.parquet` and `manifest.json`). A source whose
+entry names a `kind` is built by `gnns build-data` while that graph is selected: the kind
+selects a fetch function in `gnns.data.build.SOURCES`
+(`fetch(spec, start, end) -> (data, manifest fields)`), which validates and returns the
+dataset unwritten, and the build writes it as `<path>/<source name>.parquet` together with
+the universes. Its manifest adds `bar`, `start` and `end` to the source's own fields.
+Columns and fields per source are in that construction's doc (`docs/graphs/<name>.md`,
+"Datasets needed").
 
 A dataset is rebuilt in full, never appended to: new splits/dividends rescale history.
 Writes are atomic (write temp, then rename), and nothing is written if validation fails.
