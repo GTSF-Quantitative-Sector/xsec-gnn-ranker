@@ -11,8 +11,9 @@ import math
 import numpy as np
 import polars as pl
 
+from gnns.eval.metrics import TRADING_DAYS
+
 KEY = ["timestamp", "ticker"]
-TRADING_DAYS = 252  # per year, as in metrics.bars_per_year
 
 
 def target_weights(pred: pl.DataFrame, top_k: int, weighting: str) -> pl.DataFrame:

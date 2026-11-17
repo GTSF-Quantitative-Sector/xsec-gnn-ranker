@@ -15,7 +15,9 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
   `bars_per_year(bar) / horizon_bars`; `bars_per_year` is the one calendar-aware function.
 - Charts (`plots.py`) are matplotlib PNGs, one table per model label so the model and its
   matched baseline share each chart: IC over time, cumulative IC, IC by fold, quantile
-  cascade, quantile equity curves, training curves (portfolio charts: backtest below).
+  cascade, quantile equity curves, score spread, permutation importance, training curves
+  and feature correlation (the full list: README, "Train, evaluate and plot"; portfolio
+  charts: backtest below).
 - Every `gnns train` run logs to MLflow (`mlflow.db` + `mlruns/`, gitignored): resolved
   config, `git_sha` tag, `manifest_<name>.json` for each dataset it opened (as read at
   open time: `prices` and each builder source), test IC metrics, `<model>_val_ic` (mean over
@@ -31,12 +33,13 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
   rerun one.
 - `report.py` downloads the run's artifacts, calls `make_charts`, and logs the PNGs to
   the same run, using the run's own saved config so charts match its training settings.
-- Permutation importance (`importance.py`) is computed inside `gnns train`, per fold on
-  validation dates, while the trained model is in memory (weights are not saved).
+- Permutation importance (`importance.py`) is computed inside `gnns train` and on
+  `gnns sweep`'s final runs, per fold on validation dates, while the trained model is in
+  memory (weights are not saved).
   Scrambles stay within each date and node type; "edges" rewires who links to whom.
   Logged as `<model>_imp_<input>` and `importance.json`. Validation dates also chose the
   kept epoch, so like `val_ic` it is somewhat optimistic; it shows reliance, while the
-  future ablation (`docs/PLAN.md`) decides what to keep.
+  ablation (issue #10) decides what to keep.
 - `gnns report` also computes the feature correlation chart from the price data (search
   period only, within-date rank correlation of the construction's `features.list`).
 - The predictions table is the hand-off to the BacktestEngine, which never touches
@@ -59,7 +62,8 @@ weights, costs, tearsheet). Backtest decisions and steps: GitHub issue #2.
   `labels.forward_returns` over the run's horizon, so they cover the same open-to-open
   windows as the portfolio. They are read with `store.open`, and its manifest is logged
   as `backtest/manifest_benchmarks.json`. Sharpe is over BIL, IR over SPY. Drawdown length is in
-  trading days, comparable across horizons.
+  trading days (`metrics.TRADING_DAYS`, the one year length `bars_per_year` also uses),
+  comparable across horizons.
 - The run's saved config gives `horizon_bars` and `data.bar`; the current `backtest:`
   block gives the portfolio rules, so old runs can be re-costed. Settings are logged as
   `backtest.*` tags and `backtest/backtest.yaml`; per-rebalance tables

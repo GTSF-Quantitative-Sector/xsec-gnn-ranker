@@ -48,7 +48,7 @@ def test_run_logs_one_manifest_per_dataset_as_opened(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "mlflow_tracking_uri", lambda: uri)
     monkeypatch.setattr(run, "ROOT", tmp_path)  # experiment artifacts go to tmp_path/mlruns
     cfg = _toy_cfg(tmp_path, monkeypatch)
-    _, manifests = build_snapshots(cfg)
+    manifests = build_snapshots(cfg).manifests
     # Rebuilding a dataset after it was opened must not change what the run logs.
     (tmp_path / "events" / "manifest.json").write_text("{}")
 

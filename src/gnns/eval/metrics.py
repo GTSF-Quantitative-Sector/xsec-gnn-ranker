@@ -5,6 +5,8 @@ import math
 import numpy as np
 import polars as pl
 
+TRADING_DAYS = 252  # per year; the only calendar constant (docs/CONTRACTS.md, "Time and units")
+
 
 def daily_ic(pred: pl.DataFrame) -> pl.DataFrame:
     """Spearman rank IC between score and forward return at each timestamp."""
@@ -20,9 +22,9 @@ def bars_per_year(bar: str) -> float:
     """Bars in a trading year for a bar size: the only calendar-aware step (CONTRACTS.md)."""
     n, unit = int(bar[:-1]), bar[-1]
     if unit == "d":
-        return 252 / n
+        return TRADING_DAYS / n
     if unit == "m":
-        return 390 / n * 252  # regular session: 390 minutes per day
+        return 390 / n * TRADING_DAYS  # regular session: 390 minutes per day
     raise ValueError(f"unknown bar size {bar!r}; expected <int>d or <int>m")
 
 

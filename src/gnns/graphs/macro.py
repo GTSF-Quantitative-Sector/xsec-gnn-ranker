@@ -75,6 +75,22 @@ class MacroGraphBuilder(GraphBuilder):
     def lookbacks(self) -> dict[str, int | None]:
         return {"prices": self.window_bars + self.lag_bars + 1, "features": 1, "macro": None}
 
+    def _scaled_macro(
+        self, xreg: np.ndarray, history: np.ndarray, current: np.ndarray, change: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """(levels of `level_factors`, changes of all factors) at the window's end, each in
+        trailing standard deviations of the window's macro data: the same for every equity.
+        None when no equity can have `min_obs` complete rows or a factor has no spread."""
+        common = np.isfinite(xreg).all(axis=1)
+        if common.sum() < self.min_obs:
+            return None
+        csd = xreg[common].std(axis=0)
+        h = history[np.isfinite(history).all(axis=1)][:, self._level]
+        hsd = h.std(axis=0)
+        if np.any(csd < 1e-12) or np.any(hsd < 1e-12):
+            return None
+        return (current[self._level] - h.mean(axis=0)) / hsd, change / csd
+
     def build_at(self, t: datetime, inputs: dict[str, pl.DataFrame]) -> GraphSnapshot:
         feats = inputs["features"].sort("ticker")
         names = [c for c in feats.columns if c not in ("timestamp", "ticker")]
@@ -116,12 +132,15 @@ class MacroGraphBuilder(GraphBuilder):
         current = levels[stop] if stop >= 0 else np.full(5, np.nan)
         change = delta[stop - 1] if stop > 0 else np.full(5, np.nan)
         history = levels[lo + 1 : stop + 1]
-        chosen, betas, standardized = [], [], None
+        chosen, betas = [], []
+        scaled = None
         if (
             len(xreg) >= self.window_bars
             and np.isfinite(current).all()
             and np.isfinite(change).all()
         ):
+            scaled = self._scaled_macro(xreg, history, current, change)
+        if scaled is not None:
             for row in feats.iter_rows(named=True):
                 prices = dict(
                     inputs["prices"]
@@ -140,24 +159,14 @@ class MacroGraphBuilder(GraphBuilder):
                     continue
                 z = (xx - xx.mean(axis=0)) / sd
                 beta = np.linalg.solve(z.T @ z + self.ridge * np.eye(5), z.T @ (yy - yy.mean()))
-                # Macro scaling uses past available macro data only, common across equities.
-                common = np.isfinite(xreg).all(axis=1)
-                csd = xreg[common].std(axis=0)
-                h = history[np.isfinite(history).all(axis=1)][:, self._level]
-                hsd = h.std(axis=0)
-                if np.any(csd < 1e-12) or np.any(hsd < 1e-12):
-                    continue
-                lev = (current[self._level] - h.mean(axis=0)) / hsd
-                standardized = (lev, change / csd)
                 chosen.append(row)
                 betas.append(beta)
         count = len(chosen)
         total = count + 5 if count else 0
         x = np.zeros((total, len(node_names)), dtype=np.float32)
         b = np.array(betas, dtype=np.float32).reshape(count, 5)
-        if count:
-            assert standardized is not None
-            lev, chg = standardized
+        if scaled is not None and count:
+            lev, chg = scaled
             for i, row in enumerate(chosen):
                 x[i, :eq_dim] = np.r_[
                     [row[name] for name in names], lev, chg, b[i], np.abs(b[i]), b[i] * chg

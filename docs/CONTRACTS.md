@@ -7,7 +7,7 @@ consumer. Status: **DRAFT** — finalize after the first dry run.
 
 - Every length (window, horizon, rebalance interval, train/test fold, purge) is an
   integer count of **bars**, never a calendar unit. Config keys carry a `_bars` suffix,
-  e.g. `corr_window_bars: 400`.
+  e.g. `window_bars: 60`.
 - Bar size is a property of the dataset only, written `<int><unit>` with unit `m` or `d`
   (`1d`, `1m`, `65m`). Nothing downstream of the loader uses timedeltas or calendar math.
 - Bars are counted on the dataset's **bar axis**: the sorted unique timestamps across all
@@ -16,7 +16,8 @@ consumer. Status: **DRAFT** — finalize after the first dry run.
   is known at `t`; using rows with `timestamp <= t` is look-ahead-safe. Daily bars are
   stamped 16:00 ET, including early-close days (conservative).
 - Annualization is the only calendar-aware step: `bars_per_year` is derived from bar size
-  in one function (`1d` → 252, `65m` → 6 × 252).
+  in one function (`1d` → 252, `65m` → 6 × 252), from the one year length
+  `metrics.TRADING_DAYS`.
 
 ## Point-in-time inputs
 
@@ -186,9 +187,11 @@ of it — `gnns.data.labels.forward_returns` supplies them to training and eval.
 
 ### Invariants (checked on construction)
 
-- Nodes are exactly those that exist at `t` and pass the FeatureEngine's history
-  requirement, sorted by `(node_type, node_id)`. Row positions are not stable across
-  snapshots; track nodes across time by `node_id`.
+- Equity nodes exist at `t` and pass the FeatureEngine's history requirement; a builder
+  may drop more (e.g. the macro builder drops equities without enough data for their
+  betas). Context nodes (e.g. macro factors) are never targets. All nodes are sorted by
+  `(node_type, node_id)`. Row positions are not stable across snapshots; track nodes
+  across time by `node_id`.
 - **Column blocks:** `x[i, j] == 0` wherever `feature_owner[j] != node_type[i]`.
 - `x`, `edge_weight`, `edge_attr` are finite; `edge_weight >= 0`.
 - `edge_index` values are in `[0, N)`; no self-loops (models add their own).
