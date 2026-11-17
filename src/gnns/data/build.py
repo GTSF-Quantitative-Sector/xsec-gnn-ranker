@@ -12,7 +12,7 @@ from pathlib import Path
 import polars as pl
 
 from gnns.config import CONFIG_DIR, ROOT, git_sha
-from gnns.data import macro, massive, store
+from gnns.data import macro, massive, store, universes
 
 # kind -> fetch(spec, start, end) -> (data, manifest fields beyond built_at/git_sha/start/end)
 SOURCES: dict[str, Callable[[dict, date, date], tuple[pl.DataFrame, dict]]] = {
@@ -81,7 +81,12 @@ def buildable_sources(cfg: dict) -> dict[str, dict]:
 
 
 def _fetch(universe: str, start: date, end: date) -> tuple[list[str], pl.DataFrame]:
-    tickers = (CONFIG_DIR / "universes" / f"{universe}.txt").read_text().split()
+    spec = universes.spec(universe, CONFIG_DIR)
+    if spec["kind"] != "list":
+        raise NotImplementedError(
+            f"universe {universe!r}: membership universes are not buildable yet (issue #1)"
+        )
+    tickers = spec["tickers"]
     prices = pl.concat([massive.daily_bars(t, start, end) for t in tickers])
     divs = pl.concat([massive.dividends(t) for t in tickers])
     prices = store.adjust(prices, divs)

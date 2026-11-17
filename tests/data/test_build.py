@@ -16,7 +16,7 @@ def setup(tmp_path, monkeypatch, fake_massive):  # noqa: F811
     data, calls = fake_massive
     data["U1"] = data["R"]  # the shared universe's one ticker
     (tmp_path / "config" / "universes").mkdir(parents=True)
-    (tmp_path / "config" / "universes" / "u.txt").write_text("U1\n")
+    (tmp_path / "config" / "universes" / "u.yaml").write_text("kind: list\ntickers: [U1]\n")
     monkeypatch.setattr(build, "CONFIG_DIR", tmp_path / "config")
     monkeypatch.setattr(build, "ROOT", tmp_path)
     monkeypatch.setattr(build, "git_sha", lambda: "test")

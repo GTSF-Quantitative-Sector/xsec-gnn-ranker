@@ -153,7 +153,11 @@ stage does, edit config, not code.
 
 ### Build price datasets
 
-1. Choose universes, or add one as `config/universes/<name>.txt` (one ticker per line).
+1. Choose universes, or add one as `config/universes/<name>.yaml`:
+
+       kind: list
+       tickers: [XLB, XLC, XLE]
+
    Keep benchmark tickers in the `benchmarks` universe, never in a construction's list: every
    ticker in a universe becomes a ranked graph node.
 2. Set the `data` block in `config/config.yaml`:
@@ -327,7 +331,7 @@ stay. There is no resume: rerunning starts over.
 ### Backtest
 
 Needs the `benchmarks` universe built with the `backtest.benchmark` and
-`backtest.risk_free` tickers (SPY and BIL in `config/universes/benchmarks.txt`).
+`backtest.risk_free` tickers (SPY and BIL in `config/universes/benchmarks.yaml`).
 
 1. Set the `backtest` block in `config/config.yaml`:
 

@@ -47,13 +47,34 @@ tz-aware `America/New_York` column **`timestamp` meaning when the row became kno
 holding its data file (Parquet) and one `manifest.json` with the core fields ("manifest.json"
 below). `data/` is gitignored.
 
-Price datasets: one per (universe, bar size). Each universe's ticker list is tracked at `config/universes/<universe>.txt`, one ticker per line. Benchmarks live in
-their own `benchmarks` universe, built on the same bar size and range as the construction
-universes, and never appear in a construction's list (every universe ticker is a node).
+Price datasets: one per (universe, bar size). Each universe is defined in
+`config/universes/<universe>.yaml`, whose `kind` is one of:
+- `list`: fixed `tickers`; every ticker is a node on every date it has a bar;
+- `membership`: members change over time ("Membership universes" below).
+
+**The central equity universe** is the membership universe `sp500`. Every construction's
+tradeable nodes are this universe or a subset of it; other node types (macro factors,
+commodities, …) come from construction-specific sources. Benchmarks live in their own
+`benchmarks` list universe, built on the same bar size and range, and never appear in a
+construction's universe. The `sector_etfs` list universe stays for the existing dummy
+construction.
 
     data/<universe>/<bar>/
       prices.parquet
       manifest.json
+    data/<universe>/membership/       # membership universes only
+      membership.parquet
+      manifest.json
+    data/security_master/             # one for all membership universes
+      security_master.parquet
+      manifest.json
+    data/wrds/<extract>/              # raw WRDS extracts the datasets above are built from
+      <extract>.parquet
+      manifest.json
+
+WRDS extracts are written only by `gnns fetch-wrds`, which connects to WRDS (and may wait
+for a Duo approval); `gnns build-data` only reads them. Extracts and everything built from
+them stay under `data/` and are never committed.
 
 A construction-specific source is a folder under the data root, named in its graph file's
 `sources:` (e.g. `data/macro/` with `macro.parquet` and `manifest.json`). A source whose
@@ -84,6 +105,31 @@ Long format, one row per (timestamp, ticker), sorted by `timestamp` then `ticker
 bar's date (1.0 if none). Prices are adjusted as of `built_at`; levels differ between
 builds but returns do not.
 
+**Membership universes** adjust per `security_id`, because Massive adjusts per ticker and
+never across a ticker change. OHLC = Massive's unadjusted daily bars, fetched for the
+ticker valid on each date (security master, `ticker_massive`), × the product of the event
+factors of every later event of the security. Volume is divided by the same product's
+split part. Events, one factor each:
+
+| Event | Source | Factor |
+| :-- | :-- | :-- |
+| split | Massive split records of the ticker valid on the execution date | `split_from / split_to` |
+| cash dividend (regular or special) | Massive dividend records of the ticker valid on the ex-date | `1 − cash_amount / unadjusted close of the bar before the ex-date` |
+| spinoff, up to CRSP's last date | CRSP distributions (through the `permno` link) | CRSP's price factor for the spinoff on its ex-date |
+| spinoff, after CRSP's last date | `config/universes/adjustment_overrides.csv` (reviewed, tracked) | the factor written there |
+
+- On a date with a CRSP spinoff, Massive's split record for that date is ignored: Massive
+  records some spinoffs as splits (e.g. EBAY 2015-07-20, 1000:2376), which would count the
+  event twice.
+- `adjustment_overrides.csv` columns: `security_id, ex_date, factor, note`. A row is
+  provisional: once CRSP's data covers its `ex_date`, the build uses CRSP's factor and
+  reports the row as obsolete. Candidates come from the build's anomaly report: an
+  overnight unadjusted move beyond a threshold on a day with no split or dividend, or a
+  Massive split with a non-round ratio.
+- The build reports, for every member-day CRSP covers, the share of days on which the
+  adjusted close-to-close return matches CRSP's `dlyret` within a tolerance, and lists
+  the security-days that don't (an aggregate check; it fails nothing).
+
 **Missing bars** are absent rows, not NaN rows. Consumers that need a dense
 bar-axis × ticker matrix pivot and get NaN where a ticker has no bar.
 
@@ -94,6 +140,86 @@ bar-axis × ticker matrix pivot and get NaN where a ticker has no bar.
 - `volume >= 0`
 - every `ticker` is in `manifest.tickers`; every `timestamp` is in `[start, end]`
 - every ticker in `manifest.tickers` has at least one row
+
+## Membership universes
+
+A membership universe's file names its constituent list and how to turn it into nodes:
+
+    # config/universes/sp500.yaml
+    kind: membership
+    source: datastream            # tr_ds_equities.ds2constmth (month-end lists)
+    list_code: 4408               # S&P 500 (LS&PCOMP)
+    one_class_per_company: true   # keep the most liquid share class of each company
+    liquidity_window_bars: 126    # trailing window for "most liquid"
+
+**Node key.** Its node key is `security_id`: the Datastream infocode, written as a decimal
+string. It is stored in the `ticker` column of the universe's price dataset (and so of
+labels and predictions), so every consumer works unchanged; in these datasets "ticker"
+means "node key".
+
+### membership.parquet
+
+One row per membership interval, sorted by `security_id`, then `start`.
+
+| Column | Arrow type | Notes |
+| :-- | :-- | :-- |
+| `security_id` | `string` | Datastream infocode |
+| `start` | `timestamp[us, America/New_York]` | 16:00 on the first list date the security is on |
+| `end` | `timestamp[us, America/New_York]`, nullable | 16:00 on the first later list date it is not on; null if it is on the latest list |
+
+- A list dated `d` (the source's month-end, a trading day) is known at `d` 16:00. A
+  security is a member at `t` when `start <= t < end` (or `end` is null). The source's
+  own end dates are not used: on the latest list they are placeholders.
+- With `one_class_per_company`, each list keeps one security per company (Datastream
+  company code): the one with the highest median of unadjusted close × volume over the
+  `liquidity_window_bars` bars ending at `d`. The kept class may change between lists.
+- A member that stops trading stays a member until its next list date; it simply has no
+  more bars, and its delisting return reaches the labels through #3.
+- Invariants: `start < end`; one security's intervals don't overlap; every `security_id`
+  is in the price dataset's `manifest.tickers`.
+
+Manifest fields: `universe`, `list_code`, `one_class_per_company`, `first_list`,
+`last_list` (ISO dates), `list_dates` (count).
+
+## Security master
+
+One translation table for every security of every membership universe: dated links from
+`security_id` (the primary key) to every other identifier. Code never joins sources on raw
+tickers; it translates through this table on the date in question.
+
+`security_master.parquet`, one row per (security, identifier type, validity window),
+sorted by `security_id`, `id_type`, `valid_from`:
+
+| Column | Arrow type | Notes |
+| :-- | :-- | :-- |
+| `security_id` | `string` | Datastream infocode |
+| `id_type` | `string` | one of the types below |
+| `value` | `string` | the identifier, in its source's own format |
+| `valid_from`, `valid_to` | `date` | inclusive; `valid_to` null = still valid |
+| `source` | `string` | `datastream`, `crsp`, `massive` or `override` |
+
+| `id_type` | Source | Use |
+| :-- | :-- | :-- |
+| `cusip` | Datastream `ds2cusipchg` (8 characters) | the link to CRSP |
+| `isin` | Datastream | reference |
+| `company` | Datastream company code | one class per company |
+| `permno`, `permco` | CRSP, via the `cusip` valid on the date | CRSP data (distributions, delisting returns, checks) |
+| `ticker_crsp` | CRSP | reference |
+| `ticker_datastream` | Datastream `ds2mnemchg` (dated ticker history; an end of 2079-06-05 means open) | source of `ticker_massive` |
+| `ticker_massive` | `ticker_datastream` on the date, matched to Massive's spelling with `.` ignored (`BRKB` → `BRK.B`), kept only where Massive has a bar under it that day; within a few sessions of a ticker change, the old or new symbol, whichever has the bar (Datastream sometimes switches a day early) | fetching Massive bars, splits and dividends |
+
+- Each `id_type` is derived by one documented rule. Rows in the reviewed, tracked
+  `config/universes/security_overrides.csv` (same columns plus `note`, `source` =
+  `override`) replace derived rows for the same `security_id` and `id_type` on the dates
+  they cover.
+- Invariants (the build fails, listing violations): a security has at most one value per
+  `id_type` on any date; a `cusip`, `isin`, `permno` or ticker value points to at most one
+  security on any date (`company` and `permco` may be shared by several securities); every
+  member date has a `ticker_massive`, and a `permno` up to CRSP's last date.
+- Identifier history is used only to locate data, never as a model input, so using a later
+  rename to find earlier bars reveals nothing about returns.
+
+Manifest fields: `securities` (count), `id_types`, `crsp_last` (ISO date).
 
 ## Loading
 
@@ -107,6 +233,14 @@ directly.
   `sha256` identifies the data version in each run.
 - `store.load(root, universe, bar, start=None, end=None) -> pl.LazyFrame` opens one price
   dataset, optionally filtered to bar dates in `[start, end]`, and drops the manifest.
+- `membership.mask(root, universe, axis) -> pl.DataFrame` returns `(timestamp, ticker)`
+  for every bar-axis timestamp at which each security is a member; empty for list
+  universes, which have no membership dataset.
+- `security_master.lookup(sm, security_ids, id_type, on) -> pl.Series` translates security
+  ids to another identifier on date `on` (null where none is valid);
+  `security_master.resolve(sm, id_type, values, on) -> pl.Series` translates the other way;
+  `security_master.attach(df, sm, id_type, key="ticker", date="timestamp")` adds the
+  identifier valid on each row's date as a column named `id_type`.
 - `store.write(df, dest, manifest, file="prices.parquet")` writes the data file and the
   manifest atomically, adding `file`, `rows` and `sha256`. It refuses a manifest without
   the other core fields.
@@ -170,7 +304,7 @@ of it — `gnns.data.labels.forward_returns` supplies them to training and eval.
 | Field | dtype, shape | Notes |
 | :-- | :-- | :-- |
 | `timestamp` | tz-aware datetime | bar end, `America/New_York` |
-| `node_ids` | `str [N]` | unique; tickers for equities, names for context nodes |
+| `node_ids` | `str [N]` | unique; the price dataset's key for equities (ticker, or `security_id` in a membership universe), names for context nodes |
 | `node_type` | `int64 [N]` | index into `node_type_names` |
 | `node_type_names` | `tuple[str, ...]` | e.g. `("equity", "commodity")` |
 | `target_mask` | `bool [N]` | nodes that are scored and ranked |
@@ -187,11 +321,12 @@ of it — `gnns.data.labels.forward_returns` supplies them to training and eval.
 
 ### Invariants (checked on construction)
 
-- Equity nodes exist at `t` and pass the FeatureEngine's history requirement; a builder
-  may drop more (e.g. the macro builder drops equities without enough data for their
-  betas). Context nodes (e.g. macro factors) are never targets. All nodes are sorted by
-  `(node_type, node_id)`. Row positions are not stable across snapshots; track nodes
-  across time by `node_id`.
+- Equity nodes exist at `t`, pass the FeatureEngine's history requirement and, in a
+  membership universe, are members at `t` (history counts every bar, including bars from
+  before the security joined); a builder may drop more (e.g. the macro builder drops
+  equities without enough data for their betas). Context nodes (e.g. macro factors) are
+  never targets. All nodes are sorted by `(node_type, node_id)`. Row positions are not
+  stable across snapshots; track nodes across time by `node_id`.
 - **Column blocks:** `x[i, j] == 0` wherever `feature_owner[j] != node_type[i]`.
 - `x`, `edge_weight`, `edge_attr` are finite; `edge_weight >= 0`.
 - `edge_index` values are in `[0, N)`; no self-loops (models add their own).
@@ -217,9 +352,10 @@ a node type with one node. It must have scaled the column itself using only data
 
 ## Open questions
 
-- Ticker identity across renames/reuse (plain ticker vs. a stable security id).
-- Survivorship: fixed present-day ticker lists exclude names delisted before today.
-- Unadjusted close column for price/liquidity universe filters.
+- Labels for members that delist inside a holding window (#3): delisting returns from
+  CRSP, provisional after CRSP's last date. Added here with #3's resolution.
+- Whether to rename the `ticker` column to a neutral key name once every universe has
+  one (today it holds a `security_id` in membership universes).
 - Intraday: whether Massive's `65m` bars align to the 09:30 open; regular-hours filtering.
 - Intraday: one missing bar empties a whole volatility window; thin names at `1m` may need
   partial windows (e.g. ≥ 80% of bars present) instead of frequent median fills.

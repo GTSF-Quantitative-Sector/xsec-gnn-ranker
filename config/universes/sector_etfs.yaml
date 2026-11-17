@@ -1,0 +1,14 @@
+# The 11 GICS sector ETFs (SPDR Select Sector), used by sector_etf_corr.
+kind: list        # fixed tickers: every ticker is a node on every date it has a bar
+tickers:
+  - XLB           # materials
+  - XLC           # communication services (from 2018)
+  - XLE           # energy
+  - XLF           # financials
+  - XLI           # industrials
+  - XLK           # technology
+  - XLP           # consumer staples
+  - XLRE          # real estate (from 2015)
+  - XLU           # utilities
+  - XLV           # health care
+  - XLY           # consumer discretionary
