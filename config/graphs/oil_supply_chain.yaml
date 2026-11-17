@@ -1,0 +1,50 @@
+builder: oil_supply_chain
+universe: oil_supply_chain
+
+params:
+  oil_ticker: BNO
+  oil_return_bars: [1, 5, 20]
+  # Directed industry exposure hypotheses. These are not identified contracts.
+  edges:
+    producer_revenue: [[BNO, XOM], [BNO, CVX], [BNO, COP]]
+    crude_feedstock: [[BNO, MPC], [BNO, VLO]]
+    jet_fuel: [[MPC, DAL], [VLO, DAL], [MPC, UAL], [VLO, UAL], [MPC, UPS], [VLO, UPS]]
+    road_fuel: [[MPC, ODFL], [VLO, ODFL]]
+features:
+  min_history_bars: 63
+  list:
+    - {name: momentum, bars: 21}
+    - {name: momentum, bars: 63}
+    - {name: volatility, bars: 21}
+extra_model_features:
+  - oil_return_1
+  - oil_return_5
+  - oil_return_20
+  - oil_context_return_1
+  - oil_context_return_5
+  - oil_context_return_20
+
+model:
+  name: gatv2
+  hidden: 32
+  layers: 2
+  heads: 2
+  dropout: 0.1
+  train: {}
+model_edge_attrs: [producer_revenue, crude_feedstock, jet_fuel, road_fuel]
+
+baseline:
+  name: mlp
+  hidden: 32
+  layers: 2
+  dropout: 0.1
+  train: {}
+
+sweep:
+  seeds: [0, 1, 2]
+  model_grid:
+    model.hidden: [16, 32]
+    model.train.lr: [0.003, 0.01]
+  baseline_grid:
+    baseline.hidden: [16, 32]
+    baseline.train.lr: [0.003, 0.01]

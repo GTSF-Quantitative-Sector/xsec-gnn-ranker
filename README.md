@@ -131,8 +131,8 @@ stage does, edit config, not code.
 ### Build price datasets
 
 1. Choose universes, or add one as `config/universes/<name>.txt` (one ticker per line).
-   Keep benchmark tickers in the `benchmarks` universe, never in a construction's list: every
-   ticker in a universe becomes a ranked graph node.
+   Keep benchmark tickers in the `benchmarks` universe. Builders decide which universe
+   tickers are ranked. For example, the oil supply-chain graph uses BNO as context.
 2. Set the `data` block in `config/config.yaml`:
 
        data:
@@ -178,6 +178,7 @@ Available constructions:
 | :-- | :-- | :-- |
 | `sector_etf_corr` | 11 sector ETFs, edges = rolling return correlation; exercises the pipeline | [docs/graphs/sector_etf_corr.md](docs/graphs/sector_etf_corr.md) |
 | `macro_sensitivity` | sector ETFs + 5 macro nodes (rates, credit, VIX, oil, gold), edges = rolling ridge betas; its macro dataset is built by `gnns build-data` while selected | [docs/graphs/macro_sensitivity.md](docs/graphs/macro_sensitivity.md) |
+| `oil_supply_chain` | 10 equities and a context-only BNO node, connected by directed crude and refined-fuel exposure channels | [Oil supply-chain research and setup](docs/graphs/oil_supply_chain.md) |
 
 1. The team default construction is `graph: <name>` in `config/config.yaml`. To try another
    one locally, put `graph: <name>` in `config/machine.yaml` (see Setup). Everything

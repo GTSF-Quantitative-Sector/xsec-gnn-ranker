@@ -89,6 +89,10 @@ def build(cfg: dict) -> Built:
         for f in walk_forward(axis.filter(axis >= snaps[0].timestamp), cfg["walk_forward"], h)
         if not f.holdout
     ]
+    # The signal and both execution opens must precede the held-out period.
+    search_axis = axis.filter(axis.dt.date() < cfg["walk_forward"]["holdout_start"])
+    last_search_signal = search_axis[-h - 2]
+    snaps = [s for s in snaps if s.timestamp <= last_search_signal]
     data = [
         {
             p: build_dataset(snaps, labels, getattr(f, f"{p}_start"), getattr(f, f"{p}_end"), cfg)
