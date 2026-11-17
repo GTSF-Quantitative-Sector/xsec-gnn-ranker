@@ -18,3 +18,7 @@ Metrics are averaged across seeds, not ensemble results. SPY returned 11.64% ann
 **Paired differences.** Estimated minus constant was −0.0246 Rank IC (conditional 95% block interval: −0.0399 to −0.0086). Estimated minus shuffled was −0.0034 (−0.0176 to +0.0121). Estimated minus matched MLP was −0.0070 (−0.0275 to +0.0140). Intervals use 4,000 circular block resamples of seed-averaged date differences within each fold, with ten rebalances per block. Four-rebalance blocks gave the same qualitative conclusions. The intervals are conditional on fitted models, without multiple-comparison adjustment; the seeds reuse the same market dates.
 
 **Next experiment.** Compare equity-only, macro-state, and macro-plus-beta MLPs on the same development folds to test whether beta features help as inputs. The edge controls only address the value of supplying estimated betas on the edges. Agree on the final confirmation period with the team before scoring it, given that the earlier standalone pilot evaluated 2025.
+
+## Follow-up
+
+The matched [MLP input comparison](macro-sensitivity-mlp-inputs.md) is complete: beta-derived node features improved the average ranking score over the reduced-input models, but the paired uncertainty remains substantial.
