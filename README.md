@@ -47,6 +47,29 @@ Any top-level key in `machine.yaml` (e.g. `graph:`, `normalize:`) overrides the 
 value in `config/config.yaml`. The override replaces the key whole: nested blocks such as
 `train:` are not merged, so copy the full block to change one of its values.
 
+### WRDS access
+
+The S&P 500 universe (issue #1) uses Wharton Research Data Services (WRDS), read over its
+PostgreSQL interface with `psycopg2` (in `environment.yml`; after pulling, run
+`conda env update -f environment.yml --prune`).
+
+1. Add your WRDS login to `.env`:
+
+       WRDS_USERNAME=your_wrds_username
+       WRDS_PASSWORD=your_wrds_password
+
+   If `WRDS_PASSWORD` is not set, the password is read from a standard pgpass file instead
+   (`%APPDATA%\postgresql\pgpass.conf` on Windows, `~/.pgpass` elsewhere).
+
+2. Check the connection and what the subscription can read (approve the Duo push on your
+   phone if one arrives; the connection waits for it):
+
+       python scripts/wrds_probe.py                                # all sections
+       python scripts/wrds_probe.py --sections datastream indexes  # skip the slow general one
+
+   The probe prints metadata and aggregates only, and saves them to
+   `<data_root>/wrds_probe/` (delete the folder when done).
+
 ### CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`,

@@ -10,6 +10,7 @@ dependencies:
   - mlflow=3.17.0
   - pytorch=2.14.1         # conda picks the CUDA build when an NVIDIA driver is present
   - pytorch_geometric=2.8.1
+  - psycopg2=2.9.13        # WRDS (PostgreSQL); see README "WRDS access"
   - python-dotenv=1.2.4
   - pyyaml=6.0.3
   - requests=2.34.2
