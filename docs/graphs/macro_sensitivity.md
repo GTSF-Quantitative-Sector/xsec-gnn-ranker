@@ -104,7 +104,8 @@ numbers are 2009-2026 daily data.
 
   `macro.parquet` has exactly `timestamp` (tz-aware, the 16:00 ET bar end), `factor`,
   `value`. Factors are `rates`, `credit`, `vix`, `oil`, `gold`; `value` is the adjusted
-  close (for vix, the joined series in the first VXX note's price units). Each row is an
+  close (for vix, the joined series in the price units of the first note in the build
+  range; a `data.start` after a switch skips the notes that ended before it). Each row is an
   event updating that factor's latest known state; `timestamp` is its availability time.
   Events between bars enter at the next bar. Macro values are carried forward for at most
   `max_stale_bars` universe bars. No initial values are backward filled. Duplicate
@@ -114,8 +115,9 @@ numbers are 2009-2026 daily data.
   `availability_method`, `known_at_verified: true`, `units` (every factor `price`),
   `series` (the config used, including the join dates), `coverage` (first and last date per
   factor), `bar`, `start` and `end`. `load_macro` refuses a dataset whose manifest lacks
-  these or has other units: rebuild it with `gnns build-data`. The whole manifest is logged
-  with each run (`manifest_macro.json`).
+  `source` or `availability_method`, does not say `known_at_verified: true`, or has other
+  units: rebuild it with `gnns build-data`. The rest is provenance, logged with each run
+  as part of the whole manifest (`manifest_macro.json`).
 
 ## Params
 

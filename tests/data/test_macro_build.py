@@ -152,6 +152,17 @@ def test_segment_ending_before_its_until_rejected(fake_massive):
         fetch_macro(SPEC, START, END)
 
 
+def test_segments_ending_before_the_range_are_skipped(fake_massive):
+    """A build starting after a switch uses the later tickers only, joined the same way."""
+    full, _ = fetch_macro(SPEC, START, END)
+    for start in (DAYS[20], DAYS[21], DAYS[40], DAYS[41], DAYS[45]):  # on and after switches
+        late, _ = fetch_macro(SPEC, start, END)
+        vix, ref = _series(late, "vix"), _series(full, "vix").filter(pl.col("date") >= start)
+        assert vix["date"].to_list() == ref["date"].to_list(), start
+        r, want = (s["value"] / s["value"].shift(1) - 1 for s in (vix, ref))
+        assert r[1:].to_numpy() == pytest.approx(want[1:].to_numpy()), start  # same returns
+
+
 def test_spec_must_define_every_factor(fake_massive):
     spec = {"series": {k: v for k, v in SPEC["series"].items() if k != "gold"}}
     with pytest.raises(ValueError, match="exactly"):

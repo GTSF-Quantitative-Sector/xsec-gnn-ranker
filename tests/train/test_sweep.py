@@ -196,6 +196,17 @@ def test_better_prefers_higher_score_then_earlier_combination():
     assert not sweep.better(0.1, 3, best(0.2, 0))
     assert sweep.better(0.1, 1, best(0.1, 2))  # tie: earlier in grid order wins
     assert not sweep.better(0.1, 2, best(0.1, 1))
+    nan = float("nan")  # a fold with no validation IC
+    assert sweep.better(-0.5, 3, best(nan, 0))  # a real score replaces a NaN best
+    assert not sweep.better(nan, 0, best(-0.5, 3))
+    assert not sweep.better(nan, 0, best(nan, 1))
+
+
+def test_fold_val_ic_skips_epochs_without_a_validation_ic():
+    nan = float("nan")
+    hist = [[{"val_ic": nan}, {"val_ic": 0.2}, {"val_ic": 0.1}], [{"val_ic": nan}]]
+    assert run.fold_val_ic(hist)[0] == 0.2
+    assert run.fold_val_ic(hist)[1] != run.fold_val_ic(hist)[1]  # no IC at all: NaN
 
 
 def test_bad_combination_fails_before_any_training(tmp_path, monkeypatch):

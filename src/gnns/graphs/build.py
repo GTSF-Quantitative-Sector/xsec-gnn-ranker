@@ -1,6 +1,9 @@
 """Build the configured graph's snapshots in memory: load -> features -> build each t."""
 
 import logging
+from typing import NamedTuple
+
+import polars as pl
 
 from gnns.config import ROOT
 from gnns.data import features, store
@@ -16,10 +19,16 @@ BUILDERS: dict[str, type[GraphBuilder]] = {
 }
 
 
-def build_snapshots(cfg: dict) -> tuple[list[GraphSnapshot], dict[str, dict]]:
+class Snapshots(NamedTuple):
+    snapshots: list[GraphSnapshot]
+    manifests: dict[str, dict]  # each dataset opened (`prices`, sources), as read then
+    prices: pl.DataFrame  # the universe's prices the snapshots were built from
+
+
+def build_snapshots(cfg: dict) -> Snapshots:
     """One snapshot every `horizon_bars` bars where any node is eligible and the builder
     returns at least one target node, plus the manifest of every dataset opened (`prices`
-    and each of the builder's sources), as read at open time.
+    and each of the builder's sources), as read at open time, and the prices (for labels).
 
     Dates whose snapshot has no target node are dropped and logged; raises if none remain.
     """
@@ -66,4 +75,4 @@ def build_snapshots(cfg: dict) -> tuple[list[GraphSnapshot], dict[str, dict]]:
             f"{graph['builder']}: no snapshot has a target node; check its input coverage "
             "and history"
         )
-    return snapshots, manifests
+    return Snapshots(snapshots, manifests, prices)

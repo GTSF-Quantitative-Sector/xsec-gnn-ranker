@@ -17,6 +17,7 @@ import copy
 import itertools
 import json
 import logging
+import math
 import statistics
 import tempfile
 from dataclasses import dataclass, field
@@ -346,13 +347,23 @@ def _stage(
             if better(score, c.index, best):
                 best = Best(c, cfg_c, score, results, built)
     assert best is not None
+    if math.isnan(best.score):
+        raise ValueError(
+            f"stage {stage} ({role}): no combination has a validation IC on every fold; "
+            "check the validation periods and the models' scores"
+        )
     return best
 
 
 def better(score: float, index: int, best: Best | None) -> bool:
     """Whether a combination beats the best so far: higher mean validation IC, or equal
-    and earlier in grid order (stage 1 runs combinations grouped by build, not in order)."""
-    return best is None or (score, -index) > (best.score, -best.combo.index)
+    and earlier in grid order (stage 1 runs combinations grouped by build, not in order).
+    A NaN score (a fold with no validation IC) never beats a real one."""
+    if best is None:
+        return True
+    if math.isnan(score) or math.isnan(best.score):
+        return not math.isnan(score)
+    return (score, -index) > (best.score, -best.combo.index)
 
 
 def _final_runs(

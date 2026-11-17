@@ -32,7 +32,9 @@ loop. This layer reads machine settings.
   combination x seed, building once per distinct data-side (§2) setting; stage 2 trains
   only the baseline on every `baseline_grid` combination x seed on the stage-1 winner's
   `Built` (no rebuild). Winner = highest mean `val_ic` over seeds, ties to the earlier
-  combination in grid order (`better`). Allowed keys per grid: the table in
+  combination in grid order (`better`). Epochs with a NaN validation IC are never kept
+  (`fold_val_ic`), a NaN combination never wins, and a stage where every combination is
+  NaN stops the sweep. Allowed keys per grid: the table in
   `docs/RESEARCH_PROTOCOL.md`, "Settings: tuned vs fixed" (`check_key`).
 - Keep-best-so-far holds the winner's `Trained` per seed (predictions and models), so the
   final runs (one per seed, both winners) need no retraining; permutation importance is

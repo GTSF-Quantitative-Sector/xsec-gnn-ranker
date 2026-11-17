@@ -100,7 +100,7 @@ def builder(fixture, **params):
 
 def test_layout_mask_baseline_information_and_model_backward(fixture):
     cfg, prices, _, _ = fixture
-    snapshots, _ = build_snapshots(cfg)
+    snapshots = build_snapshots(cfg).snapshots
     s = snapshots[0]
     assert s.node_ids.tolist() == [
         "AAA",
@@ -266,7 +266,7 @@ def test_levels_only_for_level_factors_and_inverted_factor_flips_sign(fixture):
 
 def test_builder_scaled_columns_reach_the_model_unranked(fixture):
     cfg, prices, _, dest = fixture
-    snapshots, manifests = build_snapshots(cfg)
+    snapshots, manifests, _ = build_snapshots(cfg)
     assert manifests["macro"] == json.loads((dest / "manifest.json").read_text())
     s = snapshots[0]
     names = s.feature_names.tolist()

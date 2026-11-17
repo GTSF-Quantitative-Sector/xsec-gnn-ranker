@@ -5,10 +5,10 @@ Each slot is a sibling folder of the home repo (<repo>-slot<N>) with its own con
 slot always runs its own code. Datasets are shared with the home repo via machine.yaml.
 Stdlib only; run it from any env that has `conda` available (`sync` also needs `gh`).
 
-    python scripts/slot.py setup 1 2 3         # create slots (slow only the first time)
-    python scripts/slot.py start 1 backtester  # new branch from main in slot 1 (seconds)
+    python scripts/slot.py setup 1 2 3           # create slots (slow only the first time)
+    python scripts/slot.py start 1 2-backtester  # new branch from main for issue #2 (seconds)
     python scripts/slot.py list
-    python scripts/slot.py sync                # after a merge: update main, free slots
+    python scripts/slot.py sync                  # after a merge: update main, free slots
     python scripts/slot.py remove 1
 """
 
@@ -180,6 +180,17 @@ def has_commit(branch: str, commit: str) -> bool:
     return subprocess.run(git, cwd=home(), capture_output=True).returncode == 0
 
 
+def in_merged_pr(tip: str, pr: dict[str, Any]) -> bool:
+    """Whether commit `tip` is a merged PR's head or behind it (e.g. the PR was updated on
+    GitHub after this branch was pushed). PRs are squash-merged, so the head is not on main;
+    GitHub keeps it at refs/pull/<number>/head."""
+    head = pr["headRefOid"]
+    known = ["git", "cat-file", "-e", f"{head}^{{commit}}"]
+    if subprocess.run(known, cwd=home(), capture_output=True).returncode:
+        run("git", "fetch", "-q", "origin", f"pull/{pr['number']}/head", cwd=home())
+    return has_commit(head, tip)
+
+
 def status(blocked_by: list[dict[str, Any]], contains: Callable[[str], bool]) -> str:
     """Blocked while a blocker is open; resume once a blocker's closing PR is on main but not
     yet in the branch; otherwise working."""
@@ -208,12 +219,14 @@ def sync() -> None:
         for b in refs.split():
             if b == "main":
                 continue
-            merged = gh("pr", "list", "--state", "merged", "--head", b, "--json", "headRefOid",
-                        "-q", ".[].headRefOid").split()  # fmt: skip
-            if not merged:
+            prs = json.loads(
+                gh("pr", "list", "--state", "merged", "--head", b, "--json", "number,headRefOid")
+            )
+            if not prs:
                 continue
-            if run("git", "rev-parse", b, cwd=h, capture=True) not in merged:
-                print(f"{b}: PR merged, but the branch has newer commits; kept")
+            tip = run("git", "rev-parse", b, cwd=h, capture=True)
+            if not any(in_merged_pr(tip, pr) for pr in prs):
+                print(f"{b}: PR merged, but the branch has commits after it; kept")
                 continue
             held = [p for p, sb in slots.items() if sb == b]
             if busy := [p.name for p in held if dirty(p)]:
@@ -254,7 +267,7 @@ def main() -> None:
     sub.add_parser("setup", help="create slots").add_argument("slots", type=int, nargs="+")
     s = sub.add_parser("start", help="put a slot on a task branch")
     s.add_argument("slot", type=int)
-    s.add_argument("task", help="branch name, e.g. backtester")
+    s.add_argument("task", help="branch name <N>-<slug> for issue #N, e.g. 2-backtester")
     sub.add_parser("list", help="show slots, branches, uncommitted work")
     sub.add_parser("sync", help="after a merge: update main, free merged slots, show threads")
     r = sub.add_parser("remove", help="delete a slot's worktree and env")

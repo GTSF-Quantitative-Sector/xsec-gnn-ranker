@@ -44,7 +44,7 @@ def _cfg(tmp_path, window_bars: int = 5, min_history_bars: int = 5) -> dict:
 
 
 def test_snapshots_every_k_bars_once_nodes_are_eligible(tmp_path):
-    snaps, _ = build_snapshots(_cfg(tmp_path))
+    snaps = build_snapshots(_cfg(tmp_path)).snapshots
     # Bars 0..29; positions 0, 5, ..., 25; eligibility starts at position 5.
     assert [s.timestamp.day for s in snaps] == [6, 11, 16, 21, 26]
     assert all(s.edge_index.shape == (2, 6) for s in snaps)
@@ -57,7 +57,7 @@ def test_history_shorter_than_price_window_raises(tmp_path):
 
 def test_sector_etf_build_returns_the_price_manifest_and_drops_nothing(tmp_path, caplog):
     caplog.set_level(logging.INFO, logger="gnns.graphs.build")
-    _, manifests = build_snapshots(_cfg(tmp_path))
+    manifests = build_snapshots(_cfg(tmp_path)).manifests
     on_disk = json.loads((tmp_path / "etfs" / "1d" / "manifest.json").read_text())
     assert manifests == {"prices": on_disk}
     assert "dropped" not in caplog.text
@@ -129,7 +129,7 @@ def _toy_cfg(tmp_path, monkeypatch, **params) -> dict:
 
 
 def test_builder_sources_reach_the_builder_and_their_manifests_are_returned(tmp_path, monkeypatch):
-    snaps, manifests = build_snapshots(_toy_cfg(tmp_path, monkeypatch))
+    snaps, manifests, _ = build_snapshots(_toy_cfg(tmp_path, monkeypatch))
     # Point-in-time: at each t the builder saw only the events known by t.
     assert [s.timestamp.day for s in snaps] == [6, 11, 16, 21, 26]
     assert [int(s.x[0, 0]) for s in snaps] == [1, 1, 3, 3, 3]
@@ -155,7 +155,7 @@ def test_reserved_source_names_raise(tmp_path, monkeypatch):
 
 def test_dates_without_a_target_node_are_dropped_and_logged(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="gnns.graphs.build")
-    snaps, _ = build_snapshots(_toy_cfg(tmp_path, monkeypatch, empty_days=[11, 21]))
+    snaps = build_snapshots(_toy_cfg(tmp_path, monkeypatch, empty_days=[11, 21])).snapshots
     assert [s.timestamp.day for s in snaps] == [6, 16, 26]
     assert (
         "toy: dropped 2 of 5 dates with no target node "

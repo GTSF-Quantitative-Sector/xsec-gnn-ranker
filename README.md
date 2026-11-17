@@ -79,7 +79,8 @@ GitHub Issues are the to-do list, and agents follow the rules in `CLAUDE.md` ("W
 
 `scripts/issue_check.py` checks the GitHub issue of the current branch (`<N>-<slug>` works
 on issue #N) and lists what still blocks its pull request. It needs `gh`, logged in
-(`gh auth login`).
+(`gh auth login`). Branches named `research/<slug>` skip it (research write-ups, merged
+by hand); in CI, any other branch without an issue number fails it.
 
     python scripts/issue_check.py check        # what still blocks this branch's PR
     python scripts/issue_check.py check --ci   # same, but exit 1 if anything does (CI)
@@ -99,7 +100,7 @@ own code. Slots share the home repo's `data/` (via their `machine.yaml`) and cop
 MLflow runs stay per slot. From the home repo, with conda available:
 
     python scripts/slot.py setup 1 2 3          # once: worktree + env clone (~2 min each)
-    python scripts/slot.py start 1 backtester   # branch from local main (seconds)
+    python scripts/slot.py start 1 2-backtester # branch <N>-<slug> from local main (seconds)
     python scripts/slot.py list                 # slots, branches, uncommitted work
     python scripts/slot.py sync                 # after a merge: update main, free slots
     python scripts/slot.py remove 1             # delete a slot's worktree and env
@@ -116,8 +117,9 @@ the new window picks up the slot's env. Finish a task by pushing its branch and 
 pull request.
 
 After merging a pull request, run `sync` (needs `gh`). It pulls `main` in the home repo,
-deletes each branch whose PR merged and detaches its slot at `main` (it keeps a branch with
-commits after its PR, or a slot with uncommitted changes), then lists each slot's thread:
+deletes each branch whose PR merged, including one the PR moved past (e.g. updated on
+GitHub), and detaches its slot at `main` (it keeps a branch with commits the PR doesn't
+have, or a slot with uncommitted changes), then lists each slot's thread:
 blocked on an open issue, resume (a blocker's fix is on `main` but not yet in the branch:
 rebase, then read the blocker's Resolution), or working.
 

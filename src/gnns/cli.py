@@ -29,7 +29,7 @@ def main() -> None:
         for dest in build(cfg):
             print(f"wrote {dest}")
     elif args.command == "build-graphs":
-        snaps, _ = build_snapshots(cfg)
+        snaps = build_snapshots(cfg).snapshots
         nodes = [len(s.node_ids) for s in snaps]
         edges = [s.edge_index.shape[1] for s in snaps]
         print(f"{cfg['graph']['name']}: {len(snaps)} snapshots")

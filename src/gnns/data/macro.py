@@ -104,13 +104,16 @@ def _joined(factor: str, segments: list[dict], start: date, end: date) -> pl.Dat
     """One `(timestamp, value)` series from consecutive tickers, joined on returns.
 
     Segment i covers bars after segment i-1's `until` through its own `until` (the last
-    segment runs to `end`). Values keep the first segment's prices; each later segment is
+    segment runs to `end`). Segments that end before `start` are outside the range and
+    skipped. Values keep the prices of the first segment in range; each later segment is
     rescaled so its first bar's return is its own return from the switch day, or, for a
     renamed note with no bar on that day, the return between the two tickers' unadjusted
     closes.
     """
     if any(s.get("until") is None for s in segments[:-1]):
         raise ValueError(f"{factor}: every stitch segment but the last needs `until`")
+    while len(segments) > 1 and segments[0]["until"] < start:
+        segments = segments[1:]
     parts: list[pl.DataFrame] = []
     prev: tuple[str, date] | None = None  # previous segment's ticker and until
     for seg in segments:

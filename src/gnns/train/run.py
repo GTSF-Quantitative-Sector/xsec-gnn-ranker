@@ -1,14 +1,16 @@
 """`gnns train`: train the construction's model and matched baseline on every search fold,
-score each fold's test period, and log config, metrics and predictions to MLflow.
-Charts are made on demand by `gnns report <run_id>` (`gnns.eval.report`).
+score each fold's test period, and log config, metrics and predictions to MLflow. The
+command then backtests and charts the run (`gnns.cli`); this module never does.
 
 Split along its seams so `gnns sweep` (`gnns.train.sweep`) reuses each step:
 `build` (snapshots, labels, folds, datasets) -> `train` (one model on every fold) ->
-`summarize` (metrics) -> `log_run` (MLflow). `run` calls all four for both models.
+`importance` -> `summarize` (metrics) -> `log_run` (MLflow). `run` calls them for both
+models.
 """
 
 import json
 import logging
+import math
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +23,6 @@ from torch import nn
 from torch_geometric.data import Data
 
 from gnns.config import ROOT, git_sha, mlflow_tracking_uri
-from gnns.data import store
 from gnns.data.labels import forward_returns
 from gnns.eval import metrics
 from gnns.eval.importance import permutation_importance
@@ -79,9 +80,8 @@ def pick_device(cfg: dict) -> str:
 
 def build(cfg: dict) -> Built:
     """Snapshots, labels, search folds and per-fold datasets for the configured graph."""
-    graph, h = cfg["graph"], cfg["horizon_bars"]
-    snaps, manifests = build_snapshots(cfg)  # manifests as read at open time
-    prices = store.load(ROOT / cfg["data_root"], graph["universe"], cfg["data"]["bar"]).collect()
+    h = cfg["horizon_bars"]
+    snaps, manifests, prices = build_snapshots(cfg)  # manifests as read at open time
     labels = forward_returns(prices, h)
     axis = prices["timestamp"].unique().sort()
     folds = [
@@ -133,7 +133,7 @@ def train(built: Built, role: str, cfg: dict, device: str) -> Trained:
             spec["name"],
             i,
             len(hist),
-            max(e["val_ic"] for e in hist),
+            fold_val_ic([hist])[0],
         )
     return Trained(role, spec["name"], pl.concat(preds), histories, models)
 
@@ -198,8 +198,12 @@ def log_run(
 def fold_val_ic(histories: list[list[dict]]) -> list[float]:
     """Each fold's kept (best-epoch) validation IC. Their mean is `val_ic`, the sweep
     selection metric. Optimistic, since the epoch was chosen on it; compare runs with it,
-    don't report it."""
-    return [max(e["val_ic"] for e in h) for h in histories]
+    don't report it. Epochs without a validation IC (NaN) are never kept, as in
+    `train_fold`; a fold with none is NaN."""
+    return [
+        max((ic for e in h if not math.isnan(ic := e["val_ic"])), default=math.nan)
+        for h in histories
+    ]
 
 
 def _test_summary(pred: pl.DataFrame, periods_per_year: float) -> dict:
