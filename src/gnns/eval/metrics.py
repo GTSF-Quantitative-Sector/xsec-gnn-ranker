@@ -1,4 +1,8 @@
-"""Evaluator metrics on a predictions table (timestamp, ticker, score, fwd_return, ...)."""
+"""Evaluator metrics on a predictions table (timestamp, ticker, score, fwd_return, ...).
+
+Predictions keep ranked nodes without a label (null `fwd_return`, docs/CONTRACTS.md,
+"Labels"); every metric here drops them first, so it is computed on labeled nodes only.
+"""
 
 import math
 
@@ -8,10 +12,16 @@ import polars as pl
 TRADING_DAYS = 252  # per year; the only calendar constant (docs/CONTRACTS.md, "Time and units")
 
 
+def labeled(pred: pl.DataFrame) -> pl.DataFrame:
+    """Rows with a forward return."""
+    return pred.filter(pl.col("fwd_return").is_not_null() & pl.col("fwd_return").is_not_nan())
+
+
 def daily_ic(pred: pl.DataFrame) -> pl.DataFrame:
     """Spearman rank IC between score and forward return at each timestamp."""
     return (
-        pred.group_by("timestamp")
+        labeled(pred)
+        .group_by("timestamp")
         .agg(ic=pl.corr("score", "fwd_return", method="spearman"))
         .filter(pl.col("ic").is_finite())
         .sort("timestamp")
@@ -57,7 +67,8 @@ def quantile_returns(pred: pl.DataFrame, quantiles: int) -> pl.DataFrame:
     """(timestamp, quantile, ret): mean forward return per score quantile; 1 = top scores."""
     n = pl.len().over("timestamp")
     return (
-        pred.with_columns(quantile=((_rank_desc() - 1) * quantiles // n + 1).cast(pl.Int64))
+        labeled(pred)
+        .with_columns(quantile=((_rank_desc() - 1) * quantiles // n + 1).cast(pl.Int64))
         .group_by("timestamp", "quantile")
         .agg(ret=pl.col("fwd_return").mean())
         .sort("timestamp", "quantile")
@@ -67,7 +78,8 @@ def quantile_returns(pred: pl.DataFrame, quantiles: int) -> pl.DataFrame:
 def top_k_returns(pred: pl.DataFrame, k: int) -> pl.DataFrame:
     """(timestamp, ret): equal-weight mean forward return of the k highest scores."""
     return (
-        pred.filter(_rank_desc() <= k)
+        labeled(pred)
+        .filter(_rank_desc() <= k)
         .group_by("timestamp")
         .agg(ret=pl.col("fwd_return").mean())
         .sort("timestamp")
@@ -87,4 +99,6 @@ def cross_sectional_corr(feats: pl.DataFrame, names: list[str]) -> np.ndarray:
 
 def universe_returns(pred: pl.DataFrame) -> pl.DataFrame:
     """(timestamp, ret): equal-weight mean forward return of every scored node."""
-    return pred.group_by("timestamp").agg(ret=pl.col("fwd_return").mean()).sort("timestamp")
+    return (
+        labeled(pred).group_by("timestamp").agg(ret=pl.col("fwd_return").mean()).sort("timestamp")
+    )

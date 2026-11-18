@@ -51,8 +51,14 @@ loop. This layer reads machine settings.
 - `dataset.build_dataset(snapshots, labels, start, end, cfg) -> list[Data]` for one
   period (e.g. a fold's train range). One sample = one snapshot (a whole cross-section at
   one `t`), as a PyG `Data` with `x`, `edge_index`, `edge_weight`, `edge_attr`, `y`,
-  `label_mask`, plus `node_ids` and `timestamp`. `label_mask` = ranked (`target_mask`) and
-  has a label. Batch with `torch_geometric.loader.DataLoader`; graphs stay disjoint.
+  `label_mask`, `target_mask`, plus `node_ids`, `timestamp` and `labeled` (t's label
+  window is complete). `label_mask` = ranked (`target_mask`) and has a label.
+- `trainer.predict` returns every ranked node at `labeled` dates, with a null
+  `fwd_return` where it has no label (#3), and nothing at trailing dates. Metrics drop the
+  nulls; the backtest raises if it holds one.
+- Labels come from `labels.forward_returns(prices, h, delistings)`: a membership universe's
+  `delistings.parquet` gives names that delist inside the window a final-value label.
+- Batch with `torch_geometric.loader.DataLoader`; graphs stay disjoint.
 - Model node columns = the construction's `features.list` columns plus builder-added
   columns listed in its graph file's `extra_model_features` (default `[]`); edge columns
   only those in `model_edge_attrs` (default `[]`).
