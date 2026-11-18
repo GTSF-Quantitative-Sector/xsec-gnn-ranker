@@ -97,3 +97,18 @@ def test_mask_is_empty_for_a_list_universe_and_reads_the_dataset_otherwise(tmp_p
     store.write(iv, tmp_path / "u" / "membership", MANIFEST, file="membership.parquet")
     assert membership.exists(tmp_path, "u")
     assert membership.mask(tmp_path, "u", axis).rows() == [(_close(F), "7")]
+
+
+def test_membership_at_t_uses_only_lists_known_by_t():
+    """Look-ahead: cutting the source after list date d changes no membership at t <= d."""
+    full = _spells([(1, J, A), (2, J, F), (3, M, A), (4, F, M)])
+    known_by_f = full.filter(pl.col("startdate") <= F).with_columns(
+        enddate=pl.min_horizontal("enddate", pl.lit(F))
+    )
+    ts = pl.Series([_close(J), _close(date(2020, 2, 14)), _close(F)])
+
+    def mask(spells):
+        m = membership.list_members(spells, 4408, J, A)
+        return membership.member_rows(membership.intervals(m, m["list_date"]), ts)
+
+    assert mask(full).equals(mask(known_by_f))

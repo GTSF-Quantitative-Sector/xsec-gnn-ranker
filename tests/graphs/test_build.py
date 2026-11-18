@@ -183,7 +183,7 @@ def test_a_membership_universe_only_has_members_as_nodes(tmp_path):
         schema=membership.SCHEMA,
     )
     store.write(iv, tmp_path / "etfs" / "membership", MANIFEST, file="membership.parquet")
-    snaps, _ = build_snapshots(cfg)
+    snaps, _, _ = build_snapshots(cfg)
     nodes = {s.timestamp.day: sorted(s.node_ids.tolist()) for s in snaps}
     assert nodes == {
         6: ["XLE", "XLF"],
