@@ -6,7 +6,7 @@ from typing import NamedTuple
 import polars as pl
 
 from gnns.config import ROOT
-from gnns.data import features, store
+from gnns.data import features, membership, store
 from gnns.data.snapshot import GraphSnapshot
 from gnns.graphs.base import GraphBuilder
 from gnns.graphs.macro import MacroGraphBuilder
@@ -43,6 +43,11 @@ def build_snapshots(cfg: dict) -> Snapshots:
     prices = lf.collect()
     feats = features.compute(prices, graph["features"])
     axis = prices["timestamp"].unique().sort()
+    if membership.exists(root, graph["universe"]):
+        # Membership universe: a node must also be a member at t (history still counts
+        # every bar, including those from before it joined).
+        members = membership.mask(root, graph["universe"], axis)
+        feats = feats.join(members, on=["timestamp", "ticker"], how="semi")
     sources = cls.load_sources(root, graph.get("sources", {}))
     if clash := sorted(sources.keys() & {"prices", "features"}):
         raise ValueError(f"{graph['builder']}: source names {clash} are reserved")

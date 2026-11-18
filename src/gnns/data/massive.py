@@ -1,6 +1,7 @@
 """Massive REST API. The only module in gnns.data that touches the network."""
 
 import os
+import time as time_mod
 from datetime import date, time
 
 import polars as pl
@@ -11,6 +12,7 @@ from gnns.config import ROOT
 
 BASE_URL = "https://api.massive.com"
 TZ = "America/New_York"
+RETRY_WAITS = (1, 2, 4, 8, 16)  # seconds before each retry of a transient failure
 
 
 def _get(path: str, params: dict) -> list[dict]:
@@ -23,12 +25,30 @@ def _get(path: str, params: dict) -> list[dict]:
     url: str | None = BASE_URL + path
     results: list[dict] = []
     while url:
-        resp = requests.get(url, params=params, headers=headers, timeout=30)
-        resp.raise_for_status()
+        resp = _request(url, params, headers)
         body = resp.json()
         results.extend(body.get("results", []))
         url, params = body.get("next_url"), {}  # next_url already carries the query
     return results
+
+
+def _request(url: str, params: dict, headers: dict) -> requests.Response:
+    """GET with retries: a rate limit (429), a server error (5xx) or a dropped connection
+    is retried after 1, 2, 4, 8, 16 s; anything else raises at once."""
+    for wait in (*RETRY_WAITS, None):
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=30)
+            if resp.status_code != 429 and resp.status_code < 500:
+                resp.raise_for_status()
+                return resp
+            if wait is None:
+                resp.raise_for_status()
+        except (requests.ConnectionError, requests.Timeout):
+            if wait is None:
+                raise
+        assert wait is not None
+        time_mod.sleep(wait)
+    raise AssertionError("unreachable")
 
 
 def daily_bars(ticker: str, start: date, end: date, adjusted: bool = True) -> pl.DataFrame:
@@ -53,6 +73,38 @@ def daily_bars(ticker: str, start: date, end: date, adjusted: bool = True) -> pl
         pl.col("l").alias("low"),
         pl.col("c").alias("close"),
         pl.col("v").alias("volume"),
+    )
+
+
+def splits(ticker: str) -> pl.DataFrame:
+    """All of a ticker's split records: (ticker, date, split_from, split_to). `date` is the
+    execution date, the first bar on the new share basis."""
+    rows = _get("/stocks/v1/splits", {"ticker": ticker, "limit": 5000})
+    schema = {"execution_date": pl.String, "split_from": pl.Float64, "split_to": pl.Float64}
+    return pl.DataFrame(rows, schema=schema).select(
+        pl.lit(ticker).alias("ticker"),
+        pl.col("execution_date").str.to_date().alias("date"),
+        "split_from",
+        "split_to",
+    )
+
+
+def cash_dividends(ticker: str) -> pl.DataFrame:
+    """All of a ticker's dividend records with their cash amounts:
+    (ticker, date, cash_amount, currency, distribution_type); `date` is the ex-date."""
+    rows = _get("/stocks/v1/dividends", {"ticker": ticker, "limit": 5000})
+    schema = {
+        "ex_dividend_date": pl.String,
+        "cash_amount": pl.Float64,
+        "currency": pl.String,
+        "distribution_type": pl.String,
+    }
+    return pl.DataFrame(rows, schema=schema).select(
+        pl.lit(ticker).alias("ticker"),
+        pl.col("ex_dividend_date").str.to_date().alias("date"),
+        "cash_amount",
+        "currency",
+        "distribution_type",
     )
 
 

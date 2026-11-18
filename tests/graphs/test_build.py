@@ -167,3 +167,28 @@ def test_no_target_node_on_any_date_raises(tmp_path, monkeypatch):
     cfg = _toy_cfg(tmp_path, monkeypatch, empty_days=[6, 11, 16, 21, 26])
     with pytest.raises(ValueError, match="toy: no snapshot has a target node"):
         build_snapshots(cfg)
+
+
+def test_a_membership_universe_only_has_members_as_nodes(tmp_path):
+    from gnns.data import membership
+
+    cfg = _cfg(tmp_path)
+    # XLK joins at day 16; XLE leaves at day 21 (exclusive end); XLF is always a member.
+    iv = pl.DataFrame(
+        {
+            "security_id": ["XLE", "XLF", "XLK"],
+            "start": [T0, T0, T0 + timedelta(days=15)],
+            "end": [T0 + timedelta(days=20), None, None],
+        },
+        schema=membership.SCHEMA,
+    )
+    store.write(iv, tmp_path / "etfs" / "membership", MANIFEST, file="membership.parquet")
+    snaps, _ = build_snapshots(cfg)
+    nodes = {s.timestamp.day: sorted(s.node_ids.tolist()) for s in snaps}
+    assert nodes == {
+        6: ["XLE", "XLF"],
+        11: ["XLE", "XLF"],
+        16: ["XLE", "XLF", "XLK"],  # XLK's history before it joined counts
+        21: ["XLF", "XLK"],
+        26: ["XLF", "XLK"],
+    }

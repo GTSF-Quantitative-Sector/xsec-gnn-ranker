@@ -70,6 +70,16 @@ PostgreSQL interface with `psycopg2` (in `environment.yml`; after pulling, run
    The probe prints metadata and aggregates only, and saves them to
    `<data_root>/wrds_probe/` (delete the folder when done).
 
+3. Fetch the extracts the `sp500` universe is built from (one connection, about 30 s;
+   approve the Duo push):
+
+       gnns fetch-wrds
+
+   This writes `<data_root>/wrds/<extract>/` (Datastream's S&P 500 lists, ticker, CUSIP and
+   name history; CRSP's security history, distributions, delistings and daily returns,
+   from `data.start` on). Run it again to refresh: Datastream updates monthly, CRSP
+   annually. `gnns build-data` only reads these files and never connects to WRDS.
+
 ### CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`,
@@ -159,11 +169,15 @@ stage does, edit config, not code.
        tickers: [XLB, XLC, XLE]
 
    Keep benchmark tickers in the `benchmarks` universe, never in a construction's list: every
-   ticker in a universe becomes a ranked graph node.
+   ticker in a universe becomes a ranked graph node. `sp500`
+   ([config/universes/sp500.yaml](config/universes/sp500.yaml)) is the central equity universe:
+   S&P 500 members point in time (see "The sp500 universe" below). It needs
+   `gnns fetch-wrds` first (WRDS access, above).
 2. Set the `data` block in `config/config.yaml`:
 
        data:
          universes:
+           - sp500
            - sector_etfs
            - benchmarks
          bar: 1d            # shared by every universe; only 1d is supported so far
@@ -184,6 +198,36 @@ after `config/machine.yaml` overrides): the `sources:` entries in its graph file
 are not built. For `macro_sensitivity`, that is `<data_root>/macro/` (Massive series listed
 in its graph file; see [docs/graphs/macro_sensitivity.md](docs/graphs/macro_sensitivity.md)).
 They are validated together with the universes, so a failure in either writes nothing.
+
+#### The sp500 universe
+
+`gnns build-data` builds `sp500` from the cached WRDS extracts and Massive (about 90 s):
+membership from Datastream's month-end S&P 500 lists, keyed by Datastream infocode
+(`security_id`, stored in the `ticker` column); Massive's unadjusted daily bars, fetched by
+the ticker each security had on each date and adjusted by our own split, dividend and
+spinoff factors; and CRSP's delisting returns. Rules: [docs/CONTRACTS.md](docs/CONTRACTS.md),
+"Membership universes" and "Security master". It writes:
+
+- `<data_root>/sp500/1d/` prices, `<data_root>/sp500/membership/` membership intervals,
+  `<data_root>/sp500/delistings/` final returns of securities that stop trading,
+  `<data_root>/security_master/` the dated identifier table (infocode, CUSIP, PERMNO,
+  tickers, ...);
+- `<data_root>/sp500/reports/*.csv`: review reports (symbol gaps, odd split ratios,
+  unexplained price jumps, CRSP-return mismatches, delistings at the last trade, ...).
+  The build prints a summary, including how often its daily returns match CRSP's.
+
+The build fails, listing the securities, if the identifier table breaks an invariant (a
+ticker shared by two securities on a date) or a member has more than 5 sessions in a row
+without a Massive symbol. Fix those, and anything a report shows, in the two reviewed,
+tracked override files, then rebuild:
+
+- [config/universes/security_overrides.csv](config/universes/security_overrides.csv):
+  `security_id, id_type, value, valid_from, valid_to, note` replaces derived identifier
+  rows on the dates it covers (an empty `value` removes them); e.g. a `ticker_massive` row
+  for a ticker Datastream's history misses.
+- [config/universes/adjustment_overrides.csv](config/universes/adjustment_overrides.csv):
+  `security_id, ex_date, factor, note` adds a spinoff factor after CRSP's last date (CRSP's
+  own factor replaces it once CRSP covers the date).
 
 Every dataset, including a construction's extra sources, is a folder with its data file and
 one `manifest.json` (source, file, rows, sha256, build time, git SHA). **Datasets built

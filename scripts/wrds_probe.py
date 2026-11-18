@@ -21,19 +21,16 @@ Compustat, CRSP index tables, Capital IQ).
 import argparse
 import calendar
 import json
-import os
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 import psycopg2
-from dotenv import load_dotenv
 from psycopg2 import sql
 
 from gnns.config import load_config
+from gnns.data import wrds
 
-ROOT = Path(__file__).resolve().parents[1]
-HOST, PORT, DBNAME = "wrds-pgdata.wharton.upenn.edu", 9737, "wrds"
 TIMEOUT_MS = 180_000  # per query; a slow table reports a timeout instead of hanging
 
 # (library, table, date columns to range over, optional filter that keeps the query on an
@@ -83,29 +80,12 @@ NAME_PATTERNS = ["500", "const", "idx", "index", "member", "holding"]
 
 
 def connect() -> "psycopg2.extensions.connection":
-    load_dotenv(ROOT / ".env")
-    user = os.environ.get("WRDS_USERNAME")
-    if not user:
-        sys.exit("Set WRDS_USERNAME in .env (see README, 'WRDS access').")
-    # None is dropped by psycopg2, and libpq then falls back to the pgpass file.
-    password = os.environ.get("WRDS_PASSWORD") or None
-    print(f"Connecting to WRDS as {user} (approve the Duo push if your phone asks)...")
+    """gnns.data.wrds.connect, with a shorter per-query timeout for probing."""
+    print("Connecting to WRDS (approve the Duo push if your phone asks)...")
     try:
-        conn = psycopg2.connect(
-            host=HOST,
-            port=PORT,
-            dbname=DBNAME,
-            user=user,
-            password=password,
-            sslmode="require",
-            connect_timeout=60,
-        )
-    except psycopg2.OperationalError as e:
-        sys.exit(
-            f"Could not connect: {e}\nCheck WRDS_USERNAME and WRDS_PASSWORD in .env "
-            "(see README, 'WRDS access')."
-        )
-    conn.autocommit = True  # a failed probe must not abort the ones after it
+        conn = wrds.connect()
+    except RuntimeError as e:
+        sys.exit(str(e))
     with conn.cursor() as cur:
         cur.execute(f"SET statement_timeout = {TIMEOUT_MS}")
     return conn

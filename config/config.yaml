@@ -1,5 +1,6 @@
 data:
   universes:              # each → config/universes/<name>.yaml
+    - sp500                 # the central equity universe (needs gnns fetch-wrds first)
     - sector_etfs
     - benchmarks
   bar: 1d                 # shared by every universe above

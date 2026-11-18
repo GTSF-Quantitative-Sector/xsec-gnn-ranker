@@ -88,3 +88,61 @@ def test_failed_universe_writes_no_source(setup, monkeypatch):
     with pytest.raises(ValueError, match="validation failed"):
         build.build(_with_macro(cfg))
     assert not root.exists()
+
+
+def _membership_universe(tmp_path, monkeypatch, fail: bool = False):
+    """A membership universe whose (Massive + WRDS) build is stubbed."""
+    import gnns.data.equities as equities
+    from gnns.data import membership
+    from gnns.data import security_master as smod
+
+    (tmp_path / "config" / "universes" / "m.yaml").write_text(
+        "kind: membership\nsource: datastream\nlist_code: 4408\n"
+    )
+    real = massive.daily_bars("U1", START, END)
+
+    def fake(universe, spec, start, end, root, config_dir):
+        if fail:
+            raise ValueError("member sessions without a Massive symbol")
+        return equities.Built(
+            prices=real.with_columns(ticker=pl.lit("7")),
+            membership=pl.DataFrame(
+                {"security_id": ["7"], "start": [real["timestamp"].min()], "end": [None]},
+                schema=membership.SCHEMA,
+            ),
+            security_master=pl.DataFrame(schema=smod.SCHEMA),
+            delistings=pl.DataFrame({"ticker": ["7"], "delret": [0.0]}),
+            manifests={
+                k: {"source": "test"}
+                for k in ("prices", "membership", "security_master", "delistings")
+            },
+            reports={"needs_a_look": pl.DataFrame({"x": [1]}), "empty": pl.DataFrame({"x": []})},
+        )
+
+    monkeypatch.setattr(equities, "build", fake)
+
+
+def test_membership_universe_writes_its_datasets_and_reports(setup, tmp_path, monkeypatch):
+    cfg, root, _ = setup
+    _membership_universe(tmp_path, monkeypatch)
+    cfg["data"]["universes"] = ["m", "u"]
+    dests = build.build(cfg)
+    assert dests == [
+        root / "m" / "1d",
+        root / "m" / "membership",
+        root / "m" / "delistings",
+        root / "security_master",
+        root / "u" / "1d",
+    ]
+    for d in dests:
+        assert json.loads((d / "manifest.json").read_text())["git_sha"] == "test"
+    assert sorted(p.name for p in (root / "m" / "reports").iterdir()) == ["needs_a_look.csv"]
+
+
+def test_failed_membership_universe_writes_nothing(setup, tmp_path, monkeypatch):
+    cfg, root, _ = setup
+    _membership_universe(tmp_path, monkeypatch, fail=True)
+    cfg["data"]["universes"] = ["u", "m"]
+    with pytest.raises(ValueError, match="without a Massive symbol"):
+        build.build(cfg)
+    assert not root.exists()
