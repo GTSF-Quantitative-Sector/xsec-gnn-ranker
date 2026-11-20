@@ -60,7 +60,7 @@ def fixture(tmp_path):
         (Path(__file__).parents[2] / "config/graphs/macro_sensitivity.yaml").read_text()
     )
     graph.update(name="synthetic_macro", universe="etfs")
-    graph["params"].update(window_bars=10, min_obs=8, ridge=1.0)
+    graph["params"].update(window_bars=10, ridge=1.0)
     graph["features"] = {"min_history_bars": 10, "list": [{"name": "momentum", "bars": 3}]}
     graph["sources"]["macro"]["path"] = "macro"
     graph["model"].update(hidden=4, layers=1, heads=1, dropout=0.0)
@@ -152,10 +152,15 @@ def test_future_deletion_invariance(fixture, mode):
     assert np.array_equal(full.edge_attr, short.edge_attr)
 
 
-def test_macro_not_seen_before_release_and_stale_rejected(fixture):
-    b = builder(fixture, max_stale_bars=0)
+def _change(s, factor):
+    return s.x[s.target_mask, s.feature_names.tolist().index(f"macro_change_{factor}")]
+
+
+def test_macro_not_seen_before_release(fixture):
+    b = builder(fixture)
     t = fixture[2][40]
-    # A release after t cannot fill that day's missing factor.
+    # A release an hour after t is not known at t: t carries the previous value forward
+    # (zero change), and the release enters at the next bar.
     m = b._inputs["macro"]
     mask = (pl.col("timestamp") == t) & (pl.col("factor") == "credit")
     b._inputs["macro"] = m.with_columns(
@@ -164,7 +169,27 @@ def test_macro_not_seen_before_release_and_stale_rejected(fixture):
         .otherwise(pl.col("timestamp"))
         .alias("timestamp")
     ).sort("timestamp")
-    assert not b.build(t).target_mask.any()
+    s = b.build(t)
+    assert s.target_mask.any() and (_change(s, "credit") == 0).all()
+    assert (_change(builder(fixture).build(t), "credit") != 0).all()
+
+
+def test_macro_carried_forward_however_old_until_a_factor_has_no_spread(fixture):
+    ts, t = fixture[2], fixture[2][40]
+
+    def without_credit(days):
+        b = builder(fixture)
+        m = b._inputs["macro"]
+        b._inputs["macro"] = m.filter(
+            ~((pl.col("factor") == "credit") & pl.col("timestamp").is_in(days))
+        )
+        return b.build(t)
+
+    # A 4-bar gap ending at t: the last value is carried, so t's change is zero.
+    s = without_credit(ts[37:41])
+    assert s.target_mask.sum() == 3 and (_change(s, "credit") == 0).all()
+    # Carried through the whole regression window, credit has no spread: no snapshot.
+    assert not without_credit(ts[29:41]).target_mask.any()
 
 
 def test_constant_edges_remove_beta_from_both_channels_and_signed_preserves_sign(fixture):
@@ -178,11 +203,29 @@ def test_constant_edges_remove_beta_from_both_channels_and_signed_preserves_sign
 
 
 def test_missing_equity_price_never_forward_filled(fixture):
-    b = builder(fixture, min_obs=10)
-    t = fixture[2][40]
-    b._inputs["prices"] = b._inputs["prices"].filter(
-        ~((pl.col("ticker") == "BBB") & (pl.col("timestamp") == fixture[2][37]))
+    ts, t = fixture[2], fixture[2][40]
+    bbb = pl.col("ticker") == "BBB"
+
+    def build(prices):
+        b = builder(fixture)
+        b._inputs["prices"] = prices(b._inputs["prices"])
+        s = b.build(t)
+        return s.edge_weight[s.edge_index[1] == s.node_ids.tolist().index("BBB")]
+
+    gap = build(lambda p: p.filter(~(bbb & (pl.col("timestamp") == ts[37]))))
+    # The missing close's two returns leave the fit; carrying the close would differ.
+    prior = fixture[1].filter(bbb & (pl.col("timestamp") == ts[36]))["close"].item()
+    filled = build(
+        lambda p: p.with_columns(
+            close=pl.when(bbb & (pl.col("timestamp") == ts[37]))
+            .then(prior)
+            .otherwise(pl.col("close"))
+        )
     )
+    assert not np.allclose(gap, filled)
+    # Fewer complete rows than the five factors: the equity is left out.
+    b = builder(fixture)
+    b._inputs["prices"] = b._inputs["prices"].filter(~(bbb & pl.col("timestamp").is_in(ts[32:39])))
     assert "BBB" not in b.build(t).node_ids
 
 

@@ -1,6 +1,5 @@
 """Causal rolling-ridge macro graph on the shared equity bar axis."""
 
-import bisect
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +16,9 @@ from gnns.graphs.base import GraphBuilder
 # columns mean nothing ranked across factors. Betas and magnitudes differ by stock and
 # are ranked like the equity features.
 PRESCALED = ("macro_level_", "macro_change_", "interaction_", "context_", "factor_")
+# Fewest complete rows a window needs: more rows than the five regressors. Structural (the
+# fit and the standardization are undefined below it), not a setting.
+MIN_ROWS = len(FACTORS) + 1
 
 
 def equity_macro_columns(level_factors: tuple[str, ...] = FACTORS) -> list[str]:
@@ -44,27 +46,20 @@ class MacroGraphBuilder(GraphBuilder):
         axis: pl.Series,
         *,
         window_bars: int = 252,
-        min_obs: int = 200,
         ridge: float = 10.0,
         lag_bars: int = 0,
-        max_stale_bars: int = 2,
         edge_mode: str = "magnitude",
         seed: int = 7,
         invert_factors: list[str] | tuple[str, ...] = ("rates",),
         level_factors: list[str] | tuple[str, ...] = ("oil", "gold"),
     ) -> None:
-        if window_bars < 2 or not 2 <= min_obs <= window_bars or ridge <= 0:
-            raise ValueError("invalid macro regression window, minimum or ridge")
-        if (
-            lag_bars < 0
-            or max_stale_bars < 0
-            or edge_mode not in {"magnitude", "signed", "constant", "shuffled"}
-        ):
-            raise ValueError("invalid lag, staleness or edge mode")
+        if window_bars < MIN_ROWS or ridge <= 0:
+            raise ValueError(f"macro regression window must be >= {MIN_ROWS} bars and ridge > 0")
+        if lag_bars < 0 or edge_mode not in {"magnitude", "signed", "constant", "shuffled"}:
+            raise ValueError("invalid lag or edge mode")
         if not {*invert_factors, *level_factors} <= set(FACTORS):
             raise ValueError(f"invert_factors and level_factors must be among {list(FACTORS)}")
-        self.window_bars, self.min_obs, self.ridge = window_bars, min_obs, ridge
-        self.lag_bars, self.max_stale_bars = lag_bars, max_stale_bars
+        self.window_bars, self.ridge, self.lag_bars = window_bars, ridge, lag_bars
         self.edge_mode, self.seed = edge_mode, seed
         # Factor order, not config order, so columns are stable.
         self.level_factors = tuple(f for f in FACTORS if f in level_factors)
@@ -80,12 +75,13 @@ class MacroGraphBuilder(GraphBuilder):
     ) -> tuple[np.ndarray, np.ndarray] | None:
         """(levels of `level_factors`, changes of all factors) at the window's end, each in
         trailing standard deviations of the window's macro data: the same for every equity.
-        None when no equity can have `min_obs` complete rows or a factor has no spread."""
+        None when the window has fewer than `MIN_ROWS` complete rows or a factor has no
+        spread."""
         common = np.isfinite(xreg).all(axis=1)
-        if common.sum() < self.min_obs:
+        h = history[np.isfinite(history).all(axis=1)][:, self._level]
+        if common.sum() < MIN_ROWS or len(h) < MIN_ROWS:
             return None
         csd = xreg[common].std(axis=0)
-        h = history[np.isfinite(history).all(axis=1)][:, self._level]
         hsd = h.std(axis=0)
         if np.any(csd < 1e-12) or np.any(hsd < 1e-12):
             return None
@@ -105,22 +101,16 @@ class MacroGraphBuilder(GraphBuilder):
         axis = self._axis.filter(self._axis <= t).tail(self.window_bars + self.lag_bars + 1)
         n = len(axis)
         levels = np.full((n, 5), np.nan)
-        # Map known-at events to the first bar at or after publication. Rows later
-        # than t have already been excluded by GraphBuilder.build.
+        # Each bar takes the latest event known at it (an event between bars enters at the
+        # next bar), carried forward however old; bars before a factor's first event stay
+        # NaN. `gnns build-data` logs every carried bar in the manifest (`carried_forward`).
+        # Rows later than t have already been excluded by GraphBuilder.build.
+        bars = axis.dt.epoch("us").to_numpy()
         for k, factor in enumerate(FACTORS):
             events = inputs["macro"].filter(pl.col("factor") == factor)
-            if events.is_empty():
-                continue
-            event_ts = events["timestamp"].to_list()
-            values = events["value"].to_numpy()
-            for j, stamp in enumerate(axis):
-                pos = bisect.bisect_right(event_ts, stamp) - 1
-                if pos >= 0:
-                    # Count staleness on the full universe axis, including history
-                    # before this regression window.
-                    age = self._axis.search_sorted(stamp) - self._axis.search_sorted(event_ts[pos])
-                    if age <= self.max_stale_bars:
-                        levels[j, k] = values[pos]
+            pos = np.searchsorted(events["timestamp"].dt.epoch("us").to_numpy(), bars, "right") - 1
+            known = pos >= 0
+            levels[known, k] = events["value"].to_numpy()[pos[known]]
         if np.any(levels[np.isfinite(levels)] <= 0):
             raise ValueError("macro prices must be positive for fractional changes")
         # Every factor is a price series; invert_factors flip the sign (rates: IEF falls
@@ -151,7 +141,7 @@ class MacroGraphBuilder(GraphBuilder):
                 close = np.array([prices.get(stamp, np.nan) for stamp in axis])
                 y = (close[1:] / close[:-1] - 1)[lo:stop]
                 good = np.isfinite(xreg).all(axis=1) & np.isfinite(y)
-                if good.sum() < self.min_obs:
+                if good.sum() < MIN_ROWS:
                     continue
                 xx, yy = xreg[good], y[good]
                 sd = xx.std(axis=0)

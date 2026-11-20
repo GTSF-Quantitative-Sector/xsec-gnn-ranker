@@ -43,7 +43,7 @@ validation IC over seeds. Tuned values are then frozen in the graph file (below)
 The graph file's sections: §1 construction, §2 shared data side, §3 GNN, §4 baseline,
 §5 `sweep:`. Some builder params are controls or safety margins, not tuning choices, and
 stay out of grids even though they sit in §2 (e.g. the macro graph's
-`edge_mode: constant | shuffled`, `lag_bars`, `max_stale_bars`, `seed`); each graph doc
+`edge_mode: constant | shuffled`, `lag_bars`, `seed`); each graph doc
 marks them.
 
 Never pick a fixed setting by its test or held-out results.

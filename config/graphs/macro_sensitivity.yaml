@@ -18,12 +18,10 @@ sources:
 
 # --- 2. SHARED DATA SIDE: tuned in stage 1, then fixed for stage 2 ---
 params:
-  window_bars: 252        # tunable (>= min_obs)
-  min_obs: 200            # tunable
+  window_bars: 252        # tunable; returns per ridge fit (fits on its complete rows)
   ridge: 10.0             # tunable
   lag_bars: 0             # Additional bar lag after bar-end availability; robustness
                           # check, not a tuning choice: keep out of grids
-  max_stale_bars: 2       # data hygiene, not a tuning choice: keep out of grids
   edge_mode: magnitude    # magnitude | signed | constant | shuffled; constant and shuffled
                           # are placebo controls, never picked by a grid
   seed: 7                 # seed for edge_mode: shuffled; not a setting

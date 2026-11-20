@@ -37,8 +37,11 @@ beyond the supplied macro inputs, not beta signal versus a price-only model.
   `invert_factors` (rates) use minus that return. Ridge uses trailing factor-standardized
   changes and centered equity returns. `lag_bars` adds a further lag after the bar-end
   availability; it does not infer release timing. A complete window of bar positions is
-  required, with `min_obs` complete regression observations. Missing equity prices are
-  not filled; eligibility is per asset.
+  required; the fit uses the window's complete rows (equity return and all five changes).
+  The only minimums are structural, in code: more complete rows than the five factors,
+  and nonzero spread in every factor (a series carried through a whole window has none).
+  Every search-fold window on the current data has at least 241 of 252 complete rows.
+  Missing equity prices are not filled; eligibility is per asset.
 - **Equity features:** the graph file's `features.list`, plus equity-owned columns
   containing macro state (`macro_level_*` for `level_factors` only, `macro_change_*` for
   all five), signed betas (`beta_*`), magnitudes (`magnitude_*`) and beta/change
@@ -107,9 +110,10 @@ numbers are 2009-2026 daily data.
   close (for vix, the joined series in the price units of the first note in the build
   range; a `data.start` after a switch skips the notes that ended before it). Each row is an
   event updating that factor's latest known state; `timestamp` is its availability time.
-  Events between bars enter at the next bar. Macro values are carried forward for at most
-  `max_stale_bars` universe bars. No initial values are backward filled. Duplicate
-  timestamp/factor rows are rejected.
+  Events between bars enter at the next bar. A universe bar with no new event for a factor
+  carries that factor's latest value forward, however old (a carried bar's change is zero
+  and the next event's change holds the whole move). No initial values are backward
+  filled. Duplicate timestamp/factor rows are rejected.
 
   Besides the core fields, the manifest records `source` (the tickers),
   `availability_method`, `known_at_verified: true`, `units` (every factor `price`),
@@ -127,11 +131,9 @@ params in `model_grid`; the Sweep column says which are tuning choices.
 
 | Param | Meaning | Sweep |
 | :-- | :-- | :-- |
-| `window_bars` | returns per ridge regression window (`>= min_obs`) | tunable; also sets `min_history_bars` (more history, fewer folds) |
-| `min_obs` | complete observations required in the window | tunable |
+| `window_bars` | returns per ridge regression window (the fit uses its complete rows) | tunable; also sets `min_history_bars` (more history, fewer folds) |
 | `ridge` | ridge penalty | tunable |
 | `lag_bars` | additional bar lag after bar-end availability | keep out: robustness check, and it moves the folds |
-| `max_stale_bars` | bars a macro value is carried forward | keep out: data hygiene |
 | `edge_mode` | `magnitude`, `signed`, `constant` or `shuffled` | `magnitude` vs `signed` only; `constant` and `shuffled` are placebo controls, run on purpose |
 | `seed` | seed for `shuffled` | keep out: not a setting |
 | `invert_factors` | factors whose change is minus their return (`[rates]`) | keep out: part of the factor definition |
@@ -139,8 +141,9 @@ params in `model_grid`; the Sweep column says which are tuning choices.
 
 ## Limitations
 
-- BNO starts 2010-06-02, so the first snapshot with a complete 252-bar window falls in
-  mid-2011 rather than early 2011.
+- BNO starts 2010-06-02, so snapshots before about 2011-06 fit oil on fewer than 252 rows
+  (the first is 2011-01-06). They fall before the first fold's training period
+  (2011-06-08 on), so no fold uses them.
 - VXX understates the size of the most extreme volatility days (futures move less than
   spot VIX in a spike), and as an exchange-traded note its price can diverge from the
   futures it tracks when the issuer limits creation.
