@@ -7,7 +7,7 @@ import pytest
 
 import gnns.data.build as build
 import gnns.data.massive as massive
-from gnns.data.macro import load_macro
+from gnns.data.macro import FACTORS, load_macro
 from tests.data.test_macro_build import END, SPEC, START, fake_massive  # noqa: F401
 
 
@@ -30,7 +30,8 @@ def setup(tmp_path, monkeypatch, fake_massive):  # noqa: F811
 
 def _with_macro(cfg: dict, **spec) -> dict:
     source = {"kind": "macro", "path": "macro", **SPEC, **spec}
-    return cfg | {"graph": {"name": "macro_sensitivity", "sources": {"macro": source}}}
+    graph = {"name": "macro_sensitivity", "universe": "u", "sources": {"macro": source}}
+    return cfg | {"graph": graph}
 
 
 def test_graph_without_sources_builds_only_universes(setup):
@@ -49,6 +50,16 @@ def test_selected_graph_source_is_built_and_loads(setup):
     prices = json.loads((root / "u" / "1d" / "manifest.json").read_text())
     assert meta["built_at"] == prices["built_at"]  # one build, one timestamp
     assert events.height == 5 * 60
+    assert set(meta["carried_forward"]) == set(FACTORS)  # checked against u's bars
+
+
+def test_source_needs_its_graph_universe_in_the_same_build(setup):
+    cfg, root, calls = setup
+    cfg = _with_macro(cfg)
+    cfg["graph"]["universe"] = "other"
+    with pytest.raises(ValueError, match="must be in data.universes"):
+        build.build(cfg)
+    assert calls == [] and not root.exists()
 
 
 def test_source_without_kind_is_not_built(setup):

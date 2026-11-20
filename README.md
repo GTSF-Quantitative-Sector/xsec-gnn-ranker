@@ -156,7 +156,12 @@ after `config/machine.yaml` overrides): the `sources:` entries in its graph file
 `kind`, over the same date range, into `<data_root>/<path>/`. Other constructions' datasets
 are not built. For `macro_sensitivity`, that is `<data_root>/macro/` (Massive series listed
 in its graph file; see [docs/graphs/macro_sensitivity.md](docs/graphs/macro_sensitivity.md)).
-They are validated together with the universes, so a failure in either writes nothing.
+They are validated together with the universes, so a failure in either writes nothing. The
+construction's `universe` must be one of `data.universes`. For the macro dataset the
+command also prints, per factor, the bars of that universe where the factor has no bar of
+its own and its last value is carried forward (e.g. `macro oil: 27 bars carried forward
+...`); the full list is `carried_forward` in `<data_root>/macro/manifest.json`, which every
+run logs as `manifest_macro.json`.
 
 Every dataset, including a construction's extra sources, is a folder with its data file and
 one `manifest.json` (source, file, rows, sha256, build time, git SHA). **Datasets built

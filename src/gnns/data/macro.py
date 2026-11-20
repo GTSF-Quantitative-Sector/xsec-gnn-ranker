@@ -1,6 +1,7 @@
 """Build and load the known-at macro dataset: one price series per factor, from Massive."""
 
 import json
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import polars as pl
 
 from gnns.data import massive, store
 
+log = logging.getLogger(__name__)
 FACTORS = ("rates", "credit", "vix", "oil", "gold")
 # Every factor is a dividend-adjusted price (vix: VXX segments joined on returns), so the
 # builder takes fractional returns of all five (docs/graphs/macro_sensitivity.md).
@@ -21,11 +23,12 @@ AVAILABILITY = (
 MAX_SEAM_RETURN = 0.25
 
 
-def fetch_macro(spec: dict, start: date, end: date) -> tuple[pl.DataFrame, dict]:
+def fetch_macro(spec: dict, start: date, end: date, axis: pl.Series) -> tuple[pl.DataFrame, dict]:
     """Fetch, adjust, join and validate `spec["series"]`; write nothing.
 
     Returns the events `(timestamp, factor, value)` and the manifest fields beyond the
-    ones `gnns build-data` adds (`built_at`, `git_sha`, `start`, `end`).
+    ones `gnns build-data` adds (`built_at`, `git_sha`, `start`, `end`), including
+    `carried_forward` against `axis`, the graph's universe bar axis (`carried_forward`).
     """
     series = spec.get("series", {})
     if set(series) != set(FACTORS):
@@ -46,8 +49,47 @@ def fetch_macro(spec: dict, start: date, end: date) -> tuple[pl.DataFrame, dict]
         "units": UNITS,
         "series": json.loads(json.dumps(series, default=str)),
         "coverage": {r["factor"]: [r["first"], r["last"]] for r in coverage.iter_rows(named=True)},
+        "carried_forward": carried_forward(events, axis),
     }
+    for factor, c in extras["carried_forward"].items():
+        if c["bars"]:
+            first, last = c["runs"][0][0], c["runs"][-1][1]
+            log.info(
+                "macro %s: %d bars carried forward (%d runs, longest %d; %s .. %s)",
+                factor,
+                c["bars"],
+                len(c["runs"]),
+                c["longest_run"],
+                first,
+                last,
+            )
     return events, extras
+
+
+def carried_forward(events: pl.DataFrame, axis: pl.Series) -> dict[str, dict]:
+    """Per factor, the bars of `axis` after its first event that get no event of their own,
+    where the builder carries the latest value forward. An event between bars enters at the
+    next bar, as in the builder. `bars` counts them; `runs` lists each stretch of
+    consecutive carried bars as `[first date, last date, bars]`; `longest_run` is the
+    longest stretch (0 if none). Bars before a factor's first event are not counted (the
+    builder leaves them missing; `coverage` gives the first date)."""
+    bars = axis.sort().dt.epoch("us").to_numpy()
+    dates = axis.sort().dt.date().cast(pl.String).to_list()
+    out = {}
+    for factor in FACTORS:
+        stamps = events.filter(pl.col("factor") == factor)["timestamp"].dt.epoch("us").to_numpy()
+        at = np.searchsorted(bars, stamps)
+        entered = np.zeros(len(bars), dtype=bool)
+        entered[at[at < len(bars)]] = True
+        carried = ~entered & (np.cumsum(entered) > 0)
+        pos = np.flatnonzero(carried)
+        runs = np.split(pos, np.flatnonzero(np.diff(pos) > 1) + 1) if len(pos) else []
+        out[factor] = {
+            "bars": len(pos),
+            "longest_run": max((len(r) for r in runs), default=0),
+            "runs": [[dates[r[0]], dates[r[-1]], len(r)] for r in runs],
+        }
+    return out
 
 
 def load_macro(root: Path, spec: dict) -> tuple[pl.DataFrame, dict]:

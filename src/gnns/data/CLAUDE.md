@@ -13,7 +13,8 @@ fields (`docs/CONTRACTS.md`, "manifest.json"). Every read goes through `store.op
 `store.load` for prices), which returns the manifest the caller logs. A source loader
 calls `store.open`, then adds only its own checks. A source the pipeline builds has a
 fetch function registered by `kind` in `build.SOURCES`: it fetches and validates, never
-writes; `build()` writes every universe and source only after all of them validate.
+writes, and gets the graph universe's bar axis to report alignment in its manifest (the
+macro source's `carried_forward`); `build()` writes every universe and source only after all of them validate.
 
 ## FeatureEngine decisions
 

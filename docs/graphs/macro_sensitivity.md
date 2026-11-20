@@ -118,7 +118,12 @@ numbers are 2009-2026 daily data.
   Besides the core fields, the manifest records `source` (the tickers),
   `availability_method`, `known_at_verified: true`, `units` (every factor `price`),
   `series` (the config used, including the join dates), `coverage` (first and last date per
-  factor), `bar`, `start` and `end`. `load_macro` refuses a dataset whose manifest lacks
+  factor), `carried_forward`, `bar`, `start` and `end`. `carried_forward` is the log of
+  every carried value: per factor, the universe bars after its first event with no event
+  of their own (the bars the builder carries forward), as `bars` (count), `longest_run`
+  and `runs` (`[first date, last date, bars]` per stretch of consecutive carried bars).
+  `gnns build-data` prints one line per factor with any. On the current data only oil has
+  them: 27 bars from 2010-08-03 to 2010-11-30, BNO's first months, longest run 5. `load_macro` refuses a dataset whose manifest lacks
   `source` or `availability_method`, does not say `known_at_verified: true`, or has other
   units: rebuild it with `gnns build-data`. The rest is provenance, logged with each run
   as part of the whole manifest (`manifest_macro.json`).

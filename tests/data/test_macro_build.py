@@ -9,11 +9,12 @@ import pytest
 
 import gnns.data.massive as massive
 from gnns.data import store
-from gnns.data.macro import FACTORS, UNITS, fetch_macro, load_macro
+from gnns.data.macro import FACTORS, UNITS, carried_forward, fetch_macro, load_macro
 
 NY = ZoneInfo("America/New_York")
 DAYS = [date(2019, 1, 1) + timedelta(days=i) for i in range(60)]  # synthetic calendar
 START, END = DAYS[0], DAYS[-1]
+AXIS = pl.Series([datetime.combine(d, time(16), NY) for d in DAYS])  # the universe's bars
 
 
 def _closes(seed: int, n: int, level: float) -> np.ndarray:
@@ -91,7 +92,7 @@ def _series(events: pl.DataFrame, factor: str) -> pl.DataFrame:
 
 def test_fetch_joins_segments_on_returns_and_adjusts_dividends(fake_massive):
     data, _ = fake_massive
-    events, extras = fetch_macro(SPEC, START, END)
+    events, extras = fetch_macro(SPEC, START, END, AXIS)
     assert set(events["factor"]) == set(FACTORS)
     assert events["timestamp"].dt.time().unique().to_list() == [time(16)]
     assert str(events.schema["timestamp"].time_zone) == "America/New_York"  # type: ignore[union-attr]
@@ -125,10 +126,36 @@ def test_fetch_joins_segments_on_returns_and_adjusts_dividends(fake_massive):
     assert extras["series"]["vix"]["stitch"][0]["until"] == str(DAYS[20])  # JSON-safe
     assert extras["coverage"]["vix"] == [str(START), str(END)]
     assert "OLD/NEW_B/OLD" in extras["source"]
+    assert all(
+        c == {"bars": 0, "longest_run": 0, "runs": []} for c in extras["carried_forward"].values()
+    )
+
+
+def test_carried_forward_bars_are_logged_in_the_manifest(fake_massive):
+    data, _ = fake_massive
+    for i in (0, 1, 2, 10, 20, 21, 22):  # oil misses its first 3 days, then 1 and 3 days
+        del data["O"][DAYS[i]]
+    events, extras = fetch_macro(SPEC, START, END, AXIS)
+    oil = extras["carried_forward"]["oil"]
+    # Bars before the first event are missing, not carried, so they are not counted.
+    assert oil == {
+        "bars": 4,
+        "longest_run": 3,
+        "runs": [[str(DAYS[10]), str(DAYS[10]), 1], [str(DAYS[20]), str(DAYS[22]), 3]],
+    }
+    assert extras["carried_forward"]["gold"]["bars"] == 0
+    # An event between bars enters at the next bar, so its own bar is carried.
+    late = events.with_columns(
+        pl.when((pl.col("factor") == "gold") & (pl.col("timestamp").dt.date() == DAYS[30]))
+        .then(pl.col("timestamp") + timedelta(hours=1))
+        .otherwise(pl.col("timestamp"))
+        .alias("timestamp")
+    )
+    assert carried_forward(late, AXIS)["gold"]["runs"] == [[str(DAYS[30]), str(DAYS[30]), 1]]
 
 
 def test_written_dataset_loads(fake_massive, tmp_path):
-    events, extras = fetch_macro(SPEC, START, END)
+    events, extras = fetch_macro(SPEC, START, END, AXIS)
     manifest = extras | {"built_at": "2026-01-01T00:00:00+00:00", "git_sha": "test"}
     store.write(events, tmp_path / "macro", manifest, file="macro.parquet")
     loaded, meta = load_macro(tmp_path, {"path": "macro"})
@@ -142,21 +169,21 @@ def test_broken_join_rejected(fake_massive):
         adj, raw = data["NEW_B"][d]
         data["NEW_B"][d] = (adj * 1.5, raw * 1.5)
     with pytest.raises(ValueError, match="join is broken"):
-        fetch_macro(SPEC, START, END)
+        fetch_macro(SPEC, START, END, AXIS)
 
 
 def test_segment_ending_before_its_until_rejected(fake_massive):
     data, _ = fake_massive
     del data["OLD"][DAYS[20]]
     with pytest.raises(ValueError, match="ends before"):
-        fetch_macro(SPEC, START, END)
+        fetch_macro(SPEC, START, END, AXIS)
 
 
 def test_segments_ending_before_the_range_are_skipped(fake_massive):
     """A build starting after a switch uses the later tickers only, joined the same way."""
-    full, _ = fetch_macro(SPEC, START, END)
+    full, _ = fetch_macro(SPEC, START, END, AXIS)
     for start in (DAYS[20], DAYS[21], DAYS[40], DAYS[41], DAYS[45]):  # on and after switches
-        late, _ = fetch_macro(SPEC, start, END)
+        late, _ = fetch_macro(SPEC, start, END, AXIS)
         vix, ref = _series(late, "vix"), _series(full, "vix").filter(pl.col("date") >= start)
         assert vix["date"].to_list() == ref["date"].to_list(), start
         r, want = (s["value"] / s["value"].shift(1) - 1 for s in (vix, ref))
@@ -166,12 +193,12 @@ def test_segments_ending_before_the_range_are_skipped(fake_massive):
 def test_spec_must_define_every_factor(fake_massive):
     spec = {"series": {k: v for k, v in SPEC["series"].items() if k != "gold"}}
     with pytest.raises(ValueError, match="exactly"):
-        fetch_macro(spec, START, END)
+        fetch_macro(spec, START, END, AXIS)
 
 
 def test_deleting_later_data_changes_no_earlier_event(fake_massive):
-    full, _ = fetch_macro(SPEC, START, END)
+    full, _ = fetch_macro(SPEC, START, END, AXIS)
     for t in (DAYS[15], DAYS[35], DAYS[50]):  # inside each vix segment
-        short, _ = fetch_macro(SPEC, START, t)
+        short, _ = fetch_macro(SPEC, START, t, AXIS)
         cut = pl.col("timestamp").dt.date() <= t
         assert short.equals(full.filter(cut)), t

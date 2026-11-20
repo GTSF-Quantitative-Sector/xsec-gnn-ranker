@@ -2,7 +2,8 @@
 
 Shared datasets are the price universes in `data.universes`. A construction's extra
 datasets are the selected graph's `sources:` entries that name a `kind` in `SOURCES`; each
-kind's function fetches and validates its dataset and returns it unwritten.
+kind's function fetches and validates its dataset and returns it unwritten. It also gets
+the graph universe's bar axis, from the same build, to report on alignment in its manifest.
 """
 
 from collections.abc import Callable
@@ -14,8 +15,9 @@ import polars as pl
 from gnns.config import CONFIG_DIR, ROOT, git_sha
 from gnns.data import macro, massive, store
 
-# kind -> fetch(spec, start, end) -> (data, manifest fields beyond built_at/git_sha/start/end)
-SOURCES: dict[str, Callable[[dict, date, date], tuple[pl.DataFrame, dict]]] = {
+# kind -> fetch(spec, start, end, universe bar axis)
+#      -> (data, manifest fields beyond built_at/git_sha/start/end)
+SOURCES: dict[str, Callable[[dict, date, date, pl.Series], tuple[pl.DataFrame, dict]]] = {
     "macro": macro.fetch_macro,
 }
 
@@ -34,7 +36,11 @@ def build(cfg: dict) -> list[Path]:
 
     built_at = datetime.now(UTC).isoformat()
     fetched = {u: _fetch(u, start, end) for u in cfg["data"]["universes"]}
-    sources = {name: SOURCES[spec["kind"]](spec, start, end) for name, spec in specs.items()}
+    if specs:
+        axis = fetched[cfg["graph"]["universe"]][1]["timestamp"].unique().sort()
+        sources = {name: SOURCES[s["kind"]](s, start, end, axis) for name, s in specs.items()}
+    else:
+        sources = {}
 
     sha, dests = git_sha(), []
     for universe, (tickers, prices) in fetched.items():
@@ -70,12 +76,18 @@ def buildable_sources(cfg: dict) -> dict[str, dict]:
 
     Entries without a `kind` are produced outside `gnns build-data`. Other graphs'
     sources are never built: select a graph (`graph:` in machine.yaml) to build its own.
+    The graph's universe must be among `data.universes`, built in the same command.
     """
     graph = cfg.get("graph") or {}
     specs = {n: s for n, s in graph.get("sources", {}).items() if "kind" in s}
     if unknown := sorted({s["kind"] for s in specs.values()} - SOURCES.keys()):
         raise ValueError(
             f"graph {graph.get('name')!r}: unknown source kind {unknown}; valid: {sorted(SOURCES)}"
+        )
+    if specs and graph.get("universe") not in cfg["data"]["universes"]:
+        raise ValueError(
+            f"graph {graph.get('name')!r}: its universe {graph.get('universe')!r} must be in "
+            "data.universes, so its sources are checked against the same build"
         )
     return specs
 

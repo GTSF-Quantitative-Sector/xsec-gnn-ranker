@@ -59,9 +59,10 @@ A construction-specific source is a folder under the data root, named in its gra
 `sources:` (e.g. `data/macro/` with `macro.parquet` and `manifest.json`). A source whose
 entry names a `kind` is built by `gnns build-data` while that graph is selected: the kind
 selects a fetch function in `gnns.data.build.SOURCES`
-(`fetch(spec, start, end) -> (data, manifest fields)`), which validates and returns the
-dataset unwritten, and the build writes it as `<path>/<source name>.parquet` together with
-the universes. Its manifest adds `bar`, `start` and `end` to the source's own fields.
+(`fetch(spec, start, end, axis) -> (data, manifest fields)`, where `axis` is the bar axis
+of the graph's universe from the same build, which must be in `data.universes`), which
+validates and returns the dataset unwritten, and the build writes it as
+`<path>/<source name>.parquet` together with the universes. Its manifest adds `bar`, `start` and `end` to the source's own fields.
 Columns and fields per source are in that construction's doc (`docs/graphs/<name>.md`,
 "Datasets needed").
 
