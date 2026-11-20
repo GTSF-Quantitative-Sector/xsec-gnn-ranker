@@ -1,6 +1,7 @@
 """Restrictions: narrow a universe table (`gnns.data.universe`) to a subset, point in time.
 
-Each filter takes the table and returns the rows it keeps. The columns it ranks on are
+Filters rank members only: `apply` first keeps the rows with `member` true, then runs each
+filter, which takes the table and returns the rows it keeps. The columns it ranks on are
 known at each row's `timestamp` (the session close), so a filter at `t` uses nothing after
 `t`. `at` says when a filter decides:
 - `"timestamp"`: every session, on that session's values;
@@ -101,7 +102,10 @@ def check(filters: list[dict]) -> None:
 
 
 def apply(u: pl.DataFrame, filters: list[dict]) -> pl.DataFrame:
-    """`u` after each filter in order."""
+    """The member rows of `u` (all rows if it has no `member` column) after each filter in
+    order."""
+    if "member" in u.columns:
+        u = u.filter("member")
     for name, kwargs in _parse(filters):
         u = FILTERS[name](u, **kwargs)
     return u

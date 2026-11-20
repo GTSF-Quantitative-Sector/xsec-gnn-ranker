@@ -16,7 +16,7 @@ def main() -> None:
     )
     sub.add_parser(
         "build-universe",
-        help="build the sp500 universe table, raw bars, delistings and security master",
+        help="build the sp500 universe table, raw bars and delistings (Massive bars)",
     )
     sub.add_parser("build-data", help="fetch, adjust, validate and write the configured datasets")
     sub.add_parser("build-graphs", help="build the configured graph's snapshots and summarize them")

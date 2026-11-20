@@ -1,9 +1,10 @@
 """Security master: one translation table from `security_id` (Datastream infocode) to every
-other identifier, by date. Contract: docs/CONTRACTS.md, "Security master".
+other identifier, by date. Contract: docs/CONTRACTS.md, "Identifiers". Built in memory by
+`gnns build-universe` (not stored); the universe table and raw bars carry its values.
 
 Rows are `(security_id, id_type, value, valid_from, valid_to, source)`, dates inclusive,
 `valid_to` null = still valid. Each `id_type` is derived by one rule (`derive`); reviewed
-rows in `config/universes/security_overrides.csv` replace derived rows on the dates they
+rows in `config/universes/overrides.csv` replace derived rows on the dates they
 cover (`apply_overrides`); `violations` lists every broken invariant.
 """
 

@@ -26,20 +26,22 @@ writes; `build()` writes every universe and source only after all of them valida
   adjustment factor, delisting returns and market cap; Massive for the bars only (raw,
   `adjusted=false`). The data ends at CRSP's last date (#24 extends it).
 - `universe.py` (`gnns build-universe`): `fetch_bars` (network) then `assemble` (pure,
-  fixtures). Steps: security master (`security_master.py`) -> one Massive symbol per
-  session (`assign_symbols`: continuity decides ticker handovers) -> raw bars, cut at a
-  delisted security's last CRSP trading day -> membership (`membership.py`: month-end lists,
-  placeholders dropped, every share class) -> the universe table (ids, dollar volume, adv,
-  company mktcap) -> delistings -> reports.
+  fixtures). Steps: identifier table (`security_master.py`, in memory, never stored) ->
+  one Massive symbol per session (`assign_symbols`: continuity decides ticker handovers) ->
+  raw bars, cut at a delisted security's last CRSP trading day -> membership
+  (`membership.py`: month-end lists, placeholders dropped, every share class) -> the
+  universe table (every trading session with `member`, ids, dollar volume, adv, company
+  mktcap) -> delistings -> reports.
 - `adjustment.py` (`gnns build-data`): raw bars × CRSP's whole-day factor on each
-  distribution date -> prices, plus the CRSP-match check. No network.
+  distribution date (PERMNOs from the universe table) -> prices, plus the CRSP-match check.
+  No network.
 - `restrict.py`: filters a construction applies to the universe table (`universe_filters`
   in its graph file). The table keeps everything; selection never happens in the build.
 - `security_id` = Datastream infocode, stored in `ticker` (prices) / `security_id`
-  (universe table). Code translates identifiers through the security master on the date in
-  question, never by joining raw tickers.
-- Fixes are data, never code: `config/universes/security_overrides.csv`, each row with a
-  note.
+  (universe table). Code translates identifiers through the universe table (or, in the
+  build, the identifier table) on the date in question, never by joining raw tickers.
+- Fixes are data, never code: `config/universes/overrides.csv`, each row with a note.
+  The `universe-overrides` skill (`.claude/skills/`) is the procedure for proposing rows.
 - The universe modules are meant to move to their own package later (reused across
   projects): keep `security_master`, `membership`, `restrict` free of gnns-specific
   imports, and pass paths and specs in explicitly.

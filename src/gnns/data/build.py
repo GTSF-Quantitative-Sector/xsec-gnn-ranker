@@ -3,8 +3,8 @@
 Two commands, each all-or-nothing (everything validates before the first write):
 - `gnns build-universe` (`build_universe`): each membership universe in `data.universes`
   (`gnns.data.universe`) from the cached WRDS extracts (`gnns fetch-wrds`) and Massive's
-  unadjusted bars: its universe table, raw bars and delistings, and the global security
-  master, with review reports in `<data_root>/<universe>/reports/universe/`.
+  unadjusted bars: its universe table, raw bars and delistings, with review reports in
+  `<data_root>/<universe>/reports/universe/`.
 - `gnns build-data` (`build`): every universe's prices, plus the selected graph's buildable
   sources. A list universe is fetched from Massive; a membership universe's prices are its
   raw bars × CRSP's factors (`gnns.data.adjustment`), with reports in
@@ -67,7 +67,7 @@ def build(cfg: dict) -> list[Path]:
 
 def build_universe(cfg: dict) -> list[Path]:
     """Build each membership universe in `data.universes`: its universe table, raw bars
-    and delistings, and the security master. Raises if none is configured."""
+    and delistings. Raises if none is configured."""
     _, start, end = _window(cfg)
     root = ROOT / cfg["data_root"]
     names = [
@@ -77,8 +77,8 @@ def build_universe(cfg: dict) -> list[Path]:
         raise ValueError("data.universes has no membership universe to build")
     if len(names) > 1:
         raise NotImplementedError(
-            f"membership universes {names}: one at a time so far (they share one security "
-            "master; see docs/CONTRACTS.md open questions)"
+            f"membership universes {names}: one at a time so far (the WRDS cache holds one "
+            "universe's extracts; see docs/CONTRACTS.md open questions)"
         )
     stamp = {"built_at": datetime.now(UTC).isoformat(), "git_sha": git_sha()}
     pending: Pending = []
@@ -96,12 +96,6 @@ def build_universe(cfg: dict) -> list[Path]:
                 b.delistings,
                 m["delistings"] | stamp,
                 "delistings.parquet",
-            ),
-            (
-                root / "security_master",
-                b.security_master,
-                m["security_master"] | stamp,
-                "security_master.parquet",
             ),
         ]
         reports[root / name / "reports" / "universe"] = b.reports

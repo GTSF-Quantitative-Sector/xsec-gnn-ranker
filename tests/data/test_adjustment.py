@@ -7,12 +7,11 @@ import polars as pl
 import pytest
 
 from gnns.data import adjustment
-from gnns.data import security_master as smod
 
 NY = ZoneInfo("America/New_York")
 CRSP_LAST = date(2025, 12, 31)
-SM = pl.DataFrame(
-    [("1", "permno", "10", date(2000, 1, 1), None, "crsp")], schema=smod.SCHEMA, orient="row"
+LINKS = pl.DataFrame(
+    {"security_id": ["1"], "permno": ["10"], "vf": [date(2000, 1, 1)], "vt": [date(2030, 1, 1)]}
 )
 
 
@@ -69,7 +68,7 @@ def test_one_crsp_factor_per_distribution_day_covers_every_kind():
             (10, d[5], 0.0, -21.0, 20.0),  # off 1 with no distribution: reported only
         ]
     )
-    ev, unpriced, stray = adjustment.crsp_events(dist, daily, SM)
+    ev, unpriced, stray = adjustment.crsp_events(dist, daily, LINKS)
     assert ev.select("date", "factor", "split_factor").rows() == [
         (d[1], pytest.approx(0.99), pytest.approx(1.0)),
         (d[2], pytest.approx(0.5), pytest.approx(0.5)),
@@ -81,7 +80,7 @@ def test_one_crsp_factor_per_distribution_day_covers_every_kind():
 
 def test_a_distribution_without_a_crsp_day_row_is_reported():
     d = date(2020, 1, 2)
-    ev, unpriced, _ = adjustment.crsp_events(_dist([(10, d, "CASHD", 0.0)]), _daily([]), SM)
+    ev, unpriced, _ = adjustment.crsp_events(_dist([(10, d, "CASHD", 0.0)]), _daily([]), LINKS)
     assert ev.is_empty() and unpriced.rows() == [("1", d)]
 
 
@@ -139,12 +138,27 @@ def test_crsp_match_compares_member_sessions_only():
     d = _days(date(2024, 1, 2), 3)
     prices = _prices([("A", d[0], 100.0), ("A", d[1], 101.0), ("A", d[2], 90.0)])
     members = pl.DataFrame({"timestamp": prices["timestamp"][:2], "ticker": ["A", "A"]})
-    sm = pl.DataFrame([("A", "permno", "5", d[0], None, "crsp")], schema=smod.SCHEMA, orient="row")
+    ids = pl.DataFrame({"security_id": ["A"] * 3, "date": d, "permno": ["5"] * 3})
     daily = pl.DataFrame({"permno": [5, 5], "dlycaldt": [d[1], d[2]], "dlyret": [0.0101, 0.5]})
-    shares, bad = adjustment.crsp_match(prices, members, sm, daily, CRSP_LAST)
+    shares, bad = adjustment.crsp_match(prices, members, ids, daily, CRSP_LAST)
     assert shares["compared"] == 1.0  # d2 is not a member session
     assert shares["within_0.001"] == 1.0
     assert bad.is_empty()
+
+
+def test_permno_links_span_each_permnos_dates():
+    ids = pl.DataFrame(
+        {
+            "security_id": ["1", "1", "1", "1"],
+            "date": _days(date(2020, 1, 1), 4),
+            "permno": ["10", "10", None, "11"],
+        }
+    )
+    links = adjustment.permno_links(ids).sort("permno")
+    assert links.rows() == [
+        ("1", "10", date(2020, 1, 1), date(2020, 1, 2)),
+        ("1", "11", date(2020, 1, 4), date(2020, 1, 4)),
+    ]
 
 
 def test_build_needs_the_universe_build_first(tmp_path, monkeypatch):

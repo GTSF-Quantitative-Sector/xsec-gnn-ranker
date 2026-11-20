@@ -1,11 +1,14 @@
 """Build a membership universe (the central `sp500`): the universe table, the raw bars its
-prices are adjusted from, the security master and the delistings.
+prices are adjusted from, and the delistings.
 
-Contract: docs/CONTRACTS.md ("Membership universes", "Security master"). `gnns
+Contract: docs/CONTRACTS.md ("Membership universes", "Identifiers"). `gnns
 build-universe` calls `build`: `fetch_bars` (Massive, the only network step), then
 `assemble`, a pure function of the cached WRDS extracts and the bars (tested on fixtures).
-The universe table holds every member on every session it can trade; restrictions
-(`gnns.data.restrict`) narrow it to a construction's tradeable set.
+The universe table holds every session each security trades, with `member` marking S&P
+membership; restrictions (`gnns.data.restrict`) narrow the members to a construction's
+tradeable set. The dated identifier
+table (`gnns.data.security_master`) is built, corrected by `config/universes/overrides.csv`
+and checked here, in memory; the table's and raw bars' identifier columns come from it.
 """
 
 import logging
@@ -53,6 +56,7 @@ ID_COLUMNS = (
 )
 CAP_UNIT = 1000.0  # CRSP's dlycap is in thousands of dollars
 DEFAULT_ADV_WINDOWS = (20, 63)
+OVERRIDES = "overrides.csv"  # reviewed identifier fixes, in config/universes/
 
 
 @dataclass
@@ -61,7 +65,6 @@ class Built:
 
     universe: pl.DataFrame
     raw_bars: pl.DataFrame
-    security_master: pl.DataFrame
     delistings: pl.DataFrame
     manifests: dict[str, dict]  # dataset -> manifest fields beyond built_at/git_sha
     reports: dict[str, pl.DataFrame] = field(default_factory=dict)
@@ -74,6 +77,7 @@ def schema(adv_windows: tuple[int, ...] | list[int] = DEFAULT_ADV_WINDOWS) -> di
         "timestamp": pl.Datetime("us", TZ),
         "security_id": pl.String,
         "list_date": pl.Date,
+        "member": pl.Boolean,
         **dict.fromkeys(ID_COLUMNS, pl.String),
         "dollar_volume": pl.Float64,
         **{f"adv_{w}": pl.Float64 for w in adv_windows},
@@ -98,7 +102,7 @@ def load(root: Path, name: str) -> tuple[pl.DataFrame, dict]:
 
 
 def mask(root: Path, name: str, filters: list[dict] | None = None) -> pl.DataFrame:
-    """(timestamp, ticker) for every session at which a security is in the universe after
+    """(timestamp, ticker) for every session at which a security is a member, after
     `filters` (`gnns.data.restrict`); `ticker` holds the security id, the node key."""
     u, _ = load(root, name)
     u = restrict.apply(u, filters or [])
@@ -149,7 +153,7 @@ def fetch_windows_for(
     sm = _derive(ex)
     ids = _securities(ex["ds_constituents"], code, start, end)
     windows = fetch_windows(ticker_windows(sm, ex["ds_names"], ids, start, end))
-    overrides = security_master.read_overrides(config_dir / "universes" / "security_overrides.csv")
+    overrides = security_master.read_overrides(config_dir / "universes" / OVERRIDES)
     extra = overrides.filter(pl.col("id_type") == "ticker_massive").select(
         symbol="value",
         start=pl.col("valid_from") - timedelta(FETCH_PAD_DAYS),
@@ -202,10 +206,10 @@ def assemble(
         "security_id", "ticker", "vf", "vt"
     )
     sm = pl.concat([sm, runs(assign_symbols(chosen, bars, sessions))])
-    overrides = security_master.read_overrides(config_dir / "universes" / "security_overrides.csv")
+    overrides = security_master.read_overrides(config_dir / "universes" / OVERRIDES)
     sm = security_master.apply_overrides(sm, overrides).sort("security_id", "id_type", "valid_from")
     if problems := security_master.violations(sm.filter(pl.col("security_id").is_in(ids))):
-        raise ValueError(_listing("security master invariants broken", problems))
+        raise ValueError(_listing("identifier invariants broken", problems))
 
     # Raw bars: one per (security, session), invalid ones dropped, cut at CRSP's delisting.
     used = sessions_for(sm.filter(pl.col("security_id").is_in(ids)), sessions)
@@ -235,7 +239,7 @@ def assemble(
     iv = membership.intervals(per_list, all_lists)
     if problems := membership.violations(iv):
         raise ValueError(_listing("membership invariants broken", problems))
-    members = member_sessions(iv, per_list["list_date"].unique(), sessions)
+    members = member_sessions(iv, sessions)
 
     gaps = symbol_gaps(members, used, sm, sessions)
     reports["member_sessions_without_symbol"] = gaps
@@ -243,7 +247,7 @@ def assemble(
         raise ValueError(
             _listing(
                 "member sessions without a Massive symbol (add ticker_massive rows to "
-                "config/universes/security_overrides.csv)",
+                "config/universes/overrides.csv)",
                 [
                     f"security {r['security_id']}: {r['sessions']} sessions "
                     f"{r['first']}..{r['last']}"
@@ -252,23 +256,36 @@ def assemble(
             )
         )
 
-    # A member is in the table on every session up to its last bar.
+    # The table: every session a security has a bar, member or not (feature lookbacks and
+    # labels read bars outside membership), plus member sessions without a bar up to its
+    # last bar (halts). `member` marks membership; identifiers are those valid each day.
     last_bar = raw.group_by("security_id").agg(last=pl.col("date").max())
-    rows = members.join(last_bar, on="security_id").filter(pl.col("date") <= pl.col("last"))
-    rows = rows.drop("last")
+    members = members.join(last_bar, on="security_id").filter(pl.col("date") <= pl.col("last"))
+    keys = ["security_id", "date"]
     reports["member_sessions_without_bar"] = _runs_per_security(
-        rows.join(raw.select("security_id", "date"), on=["security_id", "date"], how="anti")
+        members.join(raw.select(keys), on=keys, how="anti")
+    )
+    rows = (
+        pl.concat([raw.select("timestamp", *keys), members.select("timestamp", *keys)])
+        .unique(keys)
+        .join(members.select(*keys, member=pl.lit(True)), on=keys, how="left")
+        .with_columns(pl.col("member").fill_null(False))
+        .sort("date")
+        .join_asof(
+            pl.DataFrame({"list_date": per_list["list_date"].unique().sort()}),
+            left_on="date",
+            right_on="list_date",
+            strategy="backward",
+        )
     )
     for id_type in ID_COLUMNS:
         rows = security_master.attach(rows, sm, id_type, key="security_id", date="date")
-    reports["member_sessions_without_permno"] = _runs_per_security(
-        rows.filter(pl.col("permno").is_null())
-    )
-    rows = rows.join(liquidity(raw, adv_windows), on=["security_id", "date"], how="left")
+    reports["sessions_without_permno"] = _runs_per_security(rows.filter(pl.col("permno").is_null()))
+    rows = rows.join(liquidity(raw, adv_windows), on=keys, how="left")
     rows = _carry_adv(rows, raw, adv_windows)
     rows = rows.join(market_caps(ex["crsp_daily"]), on=["permco", "date"], how="left")
     reports["member_sessions_without_mktcap"] = _runs_per_security(
-        rows.filter(pl.col("mktcap").is_null())
+        rows.filter(pl.col("member") & pl.col("mktcap").is_null())
     )
     table = rows.select(list(schema(adv_windows))).sort("timestamp", "security_id")
 
@@ -284,15 +301,13 @@ def assemble(
     stopped = final.filter(pl.col("last_bar").dt.date() < last_session)
     reports["stopped_without_crsp_delisting"] = stopped.join(ends, on="security_id", how="anti")
 
-    raw_out = raw.select("timestamp", "security_id", "symbol", *BAR_COLS).sort(
-        "timestamp", "security_id"
-    )
+    raw_out = raw.select("timestamp", "security_id", *BAR_COLS).sort("timestamp", "security_id")
     tickers = sorted(raw_out["security_id"].unique())
-    sm_out = sm.filter(pl.col("security_id").is_in(tickers))
     list_dates = per_list["list_date"].unique().sort()
-    per_day = table.group_by("timestamp").len()["len"]
+    per_day = table.filter("member").group_by("timestamp").len()["len"]
     summary = [
-        f"{len(tickers)} securities, {raw_out.height:,} bars, {table.height:,} member sessions "
+        f"{len(tickers)} securities, {raw_out.height:,} bars, {table.height:,} rows, "
+        f"{table['member'].sum():,} member sessions "
         f"over {len(list_dates)} lists ({list_dates.min()} .. {list_dates.max()}), "
         f"{per_day.min()}-{per_day.max()} members per session (all share classes)",
         f"delistings: {dl.height} with a CRSP return",
@@ -318,19 +333,13 @@ def assemble(
             "tickers": tickers,
         }
         | window,
-        "security_master": {
-            "source": "datastream, crsp, massive",
-            "securities": len(tickers),
-            "id_types": sorted(sm_out["id_type"].unique()),
-            "crsp_last": str(crsp_last),
-        },
         "delistings": {
             "source": "crsp stkdelists",
             "universe": universe,
             "crsp_last": str(crsp_last),
         },
     }
-    return Built(table, raw_out, sm_out, dl, manifests, reports, summary)
+    return Built(table, raw_out, dl, manifests, reports, summary)
 
 
 # --- Massive --------------------------------------------------------------------------------
@@ -670,17 +679,12 @@ def market_caps(crsp_daily: pl.DataFrame) -> pl.DataFrame:
 # --- Membership rows, liquidity, coverage ---------------------------------------------------
 
 
-def member_sessions(iv: pl.DataFrame, list_dates: pl.Series, sessions: pl.Series) -> pl.DataFrame:
-    """(timestamp, security_id, date, list_date) for every session at which a security is
-    a member; `list_date` is the latest list on or before the session (the one membership
-    at that session follows)."""
+def member_sessions(iv: pl.DataFrame, sessions: pl.Series) -> pl.DataFrame:
+    """(timestamp, security_id, date) for every session at which a security is a member."""
     ts = sessions.to_frame("date").select(membership.closes(pl.col("date")))["date"]
-    lists = pl.DataFrame({"list_date": list_dates.unique().sort()})
     return (
         membership.member_rows(iv, ts)
         .select("timestamp", security_id="ticker", date=pl.col("timestamp").dt.date())
-        .sort("date")
-        .join_asof(lists, left_on="date", right_on="list_date", strategy="backward")
         .sort("timestamp", "security_id")
     )
 

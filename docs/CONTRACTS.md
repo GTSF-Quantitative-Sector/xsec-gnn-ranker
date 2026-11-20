@@ -73,16 +73,13 @@ construction.
       manifest.json
     data/<universe>/reports/universe/ # membership universes only: review reports (CSV)
     data/<universe>/reports/prices/
-    data/security_master/             # one for all membership universes
-      security_master.parquet
-      manifest.json
     data/wrds/<extract>/              # raw WRDS extracts the datasets above are built from
       <extract>.parquet
       manifest.json
 
 WRDS extracts are written only by `gnns fetch-wrds`, which connects to WRDS (and may wait
 for a Duo approval). `gnns build-universe` builds a membership universe's table, raw bars
-and delistings and the security master from them and Massive; `gnns build-data` adjusts the
+and delistings from them and Massive; `gnns build-data` adjusts the
 raw bars into prices. Neither connects to WRDS. Extracts and everything built from them
 stay under `data/` and are never committed. Both builds also write review reports, one CSV
 per check that found rows (each build replaces its own); they fail nothing, and what they
@@ -123,8 +120,9 @@ unadjusted daily bars, fetched for the ticker valid on each date) × the product
 factors of every later distribution day of the security. Volume is divided by the same
 product's share part.
 
-- **A distribution day** is an ex-date in CRSP's `stkdistributions` of the PERMNO linked on
-  that date (security master). Its factor is CRSP's for the whole day,
+- **A distribution day** is an ex-date in CRSP's `stkdistributions` of the PERMNO the
+  universe table gives the security on that date (between its first and last row with
+  that PERMNO). Its factor is CRSP's for the whole day,
   `abs(price) / (abs(previous price) × (1 + total return))`. That one formula covers cash and
   stock dividends, splits, spinoffs and returns of capital, and several on one day
   together. Its share part is the product of `1 / (1 + disfacshr)` over the day's
@@ -184,16 +182,21 @@ a member; narrowing to one class per company is a restriction (below).
 
 ### universe.parquet
 
-The universe table: one row per member per session it can trade, sorted by `timestamp`,
-then `security_id`. A member is in it from its membership start until its membership end or
-its last bar, whichever comes first.
+The universe table: one row per security per session it trades, member or not, sorted by
+`timestamp`, then `security_id`. Its securities are every one on a list in `[start, end]`;
+its rows are every session with a bar, plus member sessions without one up to the
+security's last bar (halts). Non-member rows exist because feature lookbacks and labels
+read bars outside membership; they carry the identifiers valid on their own date (e.g. the
+ticker a security had before it joined). `member` marks membership; restrictions rank
+members only.
 
 | Column | Arrow type | Notes |
 | :-- | :-- | :-- |
 | `timestamp` | `timestamp[us, America/New_York]` | the session close (16:00); every value in the row is known then |
 | `security_id` | `string` | Datastream infocode |
 | `list_date` | `date` | the latest list on or before the session (the one membership follows) |
-| `ticker_massive`, `ticker_datastream`, `ticker_crsp`, `cusip`, `isin`, `company`, `permno`, `permco` | `string`, nullable | the security master's value valid on the session's date |
+| `member` | `bool` | a member at the session (rules above) |
+| `ticker_massive`, `ticker_datastream`, `ticker_crsp`, `cusip`, `isin`, `company`, `permno`, `permco` | `string`, nullable | the value valid on the session's date ("Identifiers") |
 | `dollar_volume` | `float64`, nullable | Massive VWAP × volume of the session's unadjusted bar (close × volume where Massive has no VWAP); null without a bar |
 | `adv_<w>` | `float64` | mean `dollar_volume` over the security's last `w` bars up to and including the session (fewer at the start of its history in the dataset); on a session without a bar, the last bar's value |
 | `mktcap` | `float64`, nullable | CRSP `dlycap` summed over every security of the PERMCO CRSP prices that day, in dollars: the company's market cap, the same on each of its share classes |
@@ -203,8 +206,8 @@ Manifest fields: `universe`, `list_code`, `first_list`, `last_list` (ISO dates),
 
 ### raw_bars.parquet
 
-`(timestamp, security_id, symbol, open, high, low, close, volume, vwap)`: Massive's
-unadjusted daily bars, one per security per session in `[start, end]`, from the symbol in
+`(timestamp, security_id, open, high, low, close, volume, vwap)`: Massive's unadjusted
+daily bars, one per security per session in `[start, end]`, fetched under the table's
 `ticker_massive` on that date (`vwap` nullable). Bars breaking the OHLC invariants are
 dropped and reported. A delisted security's bars end at its last CRSP trading day (below);
 later bars, e.g. OTC trading under a `Q` ticker, are dropped and reported. Manifest fields:
@@ -245,22 +248,16 @@ A construction narrows its membership universe in its graph file, applied in ord
 - Every `by` column is known at the row's `timestamp`, so a filter at `t` uses nothing
   after `t`.
 
-## Security master
+## Identifiers
 
-One translation table for every security of every membership universe: dated links from
-`security_id` (the primary key) to every other identifier. Code never joins sources on raw
-tickers; it translates through this table on the date in question.
+`gnns build-universe` builds one dated translation table (`gnns.data.security_master`) from
+`security_id` (the primary key) to every other identifier, corrects it with the overrides
+file, checks it, and reads each row's identifiers off it. It is not stored: the universe
+table carries its values on every session a security trades. Code never joins sources on
+raw tickers; it translates on the date in question.
 
-`security_master.parquet`, one row per (security, identifier type, validity window),
-sorted by `security_id`, `id_type`, `valid_from`:
-
-| Column | Arrow type | Notes |
-| :-- | :-- | :-- |
-| `security_id` | `string` | Datastream infocode |
-| `id_type` | `string` | one of the types below |
-| `value` | `string` | the identifier, in its source's own format |
-| `valid_from`, `valid_to` | `date` | inclusive; `valid_to` null = still valid |
-| `source` | `string` | `datastream`, `crsp`, `massive` or `override` |
+Its rows are `(security_id, id_type, value, valid_from, valid_to, source)`, dates inclusive,
+`valid_to` null = still valid, `source` one of `datastream`, `crsp`, `massive`, `override`.
 
 | `id_type` | Source | Use |
 | :-- | :-- | :-- |
@@ -273,18 +270,17 @@ sorted by `security_id`, `id_type`, `valid_from`:
 | `ticker_massive` | `ticker_datastream` on the date, in the Massive spelling with the most bars in that ticker's interval (as written, or with `.` added or removed for a share class: `BRKB` → `BRK.B`). Within 7 days of a ticker change the neighbouring interval's symbol is a candidate too (Datastream sometimes switches a day early or late, and at a handover a symbol may still or already belong to another security): a neighbouring symbol is used only if its close is within a 20% log move of the security's previous close, and among candidates with a bar the nearest close wins, the interval's own symbol on ties within 0.02 | fetching Massive bars |
 
 - Each `id_type` is derived by one documented rule. Rows in the reviewed, tracked
-  `config/universes/security_overrides.csv` (same columns plus `note`, `source` =
-  `override`) replace derived rows for the same `security_id` and `id_type` on the dates
-  they cover.
-- Invariants (the build fails, listing violations): a security has at most one value per
-  `id_type` on any date; a `cusip`, `isin`, `permno` or ticker value points to at most one
-  security on any date (`company` and `permco` may be shared by several securities).
-  Member sessions without a `permno` are reported (they get no CRSP factor, delisting
-  return or market cap).
+  `config/universes/overrides.csv` (`security_id, id_type, value, valid_from, valid_to,
+  note`) replace derived rows for the same `security_id` and `id_type` on the dates they
+  cover; an empty `value` only removes. A `ticker_massive` override's symbol is also
+  fetched. The project skill `universe-overrides` is the procedure for proposing rows.
+- Invariants (the build fails, listing violations; messages name securities, types and
+  dates, never values): a security has at most one value per `id_type` on any date; a
+  `cusip`, `isin`, `permno` or ticker value points to at most one security on any date
+  (`company` and `permco` may be shared by several securities). Sessions without a
+  `permno` are reported (they get no CRSP factor, delisting return or market cap).
 - Identifier history is used only to locate data, never as a model input, so using a later
   rename to find earlier bars reveals nothing about returns.
-
-Manifest fields: `securities` (count), `id_types`, `crsp_last` (ISO date).
 
 ## Loading
 
@@ -301,13 +297,9 @@ directly.
 - `universe.load(root, universe) -> (pl.DataFrame, dict)` reads a membership universe's
   table and manifest (raising "run gnns build-universe first" if it is missing);
   `universe.mask(root, universe, filters) -> pl.DataFrame` returns `(timestamp, ticker)` for
-  every session at which a security is in the table after the graph's `universe_filters`
-  (`restrict.apply(table, filters)`).
-- `security_master.lookup(sm, security_ids, id_type, on) -> pl.Series` translates security
-  ids to another identifier on date `on` (null where none is valid);
-  `security_master.resolve(sm, id_type, values, on) -> pl.Series` translates the other way;
-  `security_master.attach(df, sm, id_type, key="ticker", date="timestamp")` adds the
-  identifier valid on each row's date as a column named `id_type`.
+  every session at which a security is a member after the graph's `universe_filters`
+  (`restrict.apply(table, filters)`, which keeps member rows first). To translate an
+  identifier on a date, filter the table on that date and column.
 - `store.write(df, dest, manifest, file="prices.parquet")` writes the data file and the
   manifest atomically, adding `file`, `rows` and `sha256`. It refuses a manifest without
   the other core fields.
@@ -430,7 +422,7 @@ a node type with one node. It must have scaled the column itself using only data
 
 ## Open questions
 
-- Several membership universes: they would share one security master; `gnns
+- Several membership universes: the WRDS cache holds one universe's extracts, so `gnns
   build-universe` builds one at a time so far.
 - Data after CRSP's last date (issue #24).
 

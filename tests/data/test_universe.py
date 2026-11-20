@@ -295,14 +295,14 @@ def _world():
 SPEC = {"list_code": 4408, "adv_windows": [2]}
 
 
-def test_the_table_has_every_member_session_with_ids_liquidity_and_company_mktcap(tmp_path):
+def test_the_table_has_every_trading_session_with_membership_ids_and_metrics(tmp_path):
     ex, bars = _world()
     b = universe.assemble("u", SPEC, START, END, ex, bars, tmp_path)
     t = b.universe
     assert t.columns == list(universe.schema((2,)))
     on = {
         d: sorted(g["security_id"].to_list())
-        for (d,), g in t.group_by(pl.col("timestamp").dt.date())
+        for (d,), g in t.filter("member").group_by(pl.col("timestamp").dt.date())
     }
     assert on[J] == ["1", "2", "3"]  # both share classes are members
     assert on[date(2020, 2, 19)] == ["1", "2", "3"]
@@ -318,6 +318,12 @@ def test_the_table_has_every_member_session_with_ids_liquidity_and_company_mktca
     )
     assert row["mktcap"] == pytest.approx(3_000_000.0)  # 101 + 102 + 199, in dollars
     assert t.filter(pl.col("security_id") == "2")["mktcap"].unique().to_list() == [3_000_000.0]
+    # 4 trades from March 1 but joins on the March 31 list: its earlier rows carry its
+    # identifiers too (for lookbacks), as non-members.
+    four = t.filter(pl.col("security_id") == "4").sort("timestamp")
+    assert four["timestamp"].dt.date().min() == date(2020, 3, 1)
+    assert four["member"].to_list() == [False] * 30 + [True]
+    assert four["ticker_massive"].unique().to_list() == ["DDD"]
     feb = t.filter(pl.col("timestamp").dt.date().is_between(date(2020, 2, 1), date(2020, 2, 27)))
     assert feb["list_date"].unique().to_list() == [J]
 
@@ -327,6 +333,7 @@ def test_the_table_has_every_member_session_with_ids_liquidity_and_company_mktca
     last3 = b.raw_bars.filter(pl.col("security_id") == "3")["timestamp"].dt.date().max()
     assert last3 == date(2020, 2, 19)
     assert sorted(b.raw_bars["security_id"].unique()) == ["1", "2", "3", "4"]
+    assert b.raw_bars.columns == ["timestamp", "security_id", *universe.BAR_COLS]
     assert b.reports["member_sessions_without_symbol"].is_empty()
 
 

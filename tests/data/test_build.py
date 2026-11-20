@@ -94,7 +94,6 @@ def _membership_universe(tmp_path, monkeypatch, fail: bool = False):
     """A membership universe whose universe build (Massive + WRDS) and adjustment are
     stubbed."""
     from gnns.data import adjustment, universe
-    from gnns.data import security_master as smod
 
     (tmp_path / "config" / "universes" / "m.yaml").write_text(
         "kind: membership\nsource: datastream\nlist_code: 4408\n"
@@ -108,12 +107,8 @@ def _membership_universe(tmp_path, monkeypatch, fail: bool = False):
         return universe.Built(
             universe=pl.DataFrame({"timestamp": real["timestamp"], "security_id": "7"}),
             raw_bars=real.with_columns(security_id=pl.lit("7")),
-            security_master=pl.DataFrame(schema=smod.SCHEMA),
             delistings=pl.DataFrame({"ticker": ["7"], "delret": [0.0]}),
-            manifests={
-                k: {"source": "test"}
-                for k in ("universe", "raw_bars", "security_master", "delistings")
-            },
+            manifests={k: {"source": "test"} for k in ("universe", "raw_bars", "delistings")},
             reports=reports,
         )
 
@@ -136,7 +131,6 @@ def test_build_universe_writes_its_datasets_and_reports(setup, tmp_path, monkeyp
         root / "m" / "universe",
         root / "m" / "raw_bars",
         root / "m" / "delistings",
-        root / "security_master",
     ]
     for d in dests:
         assert json.loads((d / "manifest.json").read_text())["git_sha"] == "test"

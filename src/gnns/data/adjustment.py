@@ -1,9 +1,9 @@
 """Adjust a membership universe's raw bars with CRSP's distribution factors.
 
 Contract: docs/CONTRACTS.md ("prices.parquet"). `gnns build-data` calls `build`, which
-reads the raw bars and security master `gnns build-universe` wrote and the cached CRSP
-extracts, and returns the prices and review reports unwritten. Nothing here touches the
-network.
+reads the raw bars and universe table `gnns build-universe` wrote (the table gives each
+bar's PERMNO on its date) and the cached CRSP extracts, and returns the prices and review
+reports unwritten. Nothing here touches the network.
 """
 
 import logging
@@ -13,8 +13,7 @@ from pathlib import Path
 
 import polars as pl
 
-from gnns.data import security_master, store, universe, wrds
-from gnns.data.security_master import FAR
+from gnns.data import store, universe, wrds
 
 log = logging.getLogger(__name__)
 EXTRACTS = {
@@ -55,14 +54,12 @@ def build(name: str, start: date, end: date, root: Path) -> Built:
             f"{start}..{end}; run gnns build-universe"
         )
     raw = lf.collect().with_columns(date=pl.col("timestamp").dt.date())
-    sm, _ = store.open(root / "security_master")
     table, _ = universe.load(root, name)
-    return assemble(raw, sm.collect(), table, ex, m["tickers"], start, end)
+    return assemble(raw, table, ex, m["tickers"], start, end)
 
 
 def assemble(
     raw: pl.DataFrame,
-    sm: pl.DataFrame,
     table: pl.DataFrame,
     ex: dict[str, pl.DataFrame],
     tickers: list[str],
@@ -71,11 +68,13 @@ def assemble(
 ) -> Built:
     crsp_last = ex["crsp_daily"]["dlycaldt"].max()
     assert isinstance(crsp_last, date)
-    events, unpriced, stray = crsp_events(ex["crsp_distributions"], ex["crsp_daily"], sm)
+    ids = table.select("security_id", "permno", date=pl.col("timestamp").dt.date())
+    links = permno_links(ids)
+    events, unpriced, stray = crsp_events(ex["crsp_distributions"], ex["crsp_daily"], links)
     prices = adjust(raw, events)
     store.validate(prices, tickers, start, end)
-    members = table.select("timestamp", ticker="security_id")
-    shares, mismatches = crsp_match(prices, members, sm, ex["crsp_daily"], crsp_last)
+    members = table.filter("member").select("timestamp", ticker="security_id")
+    shares, mismatches = crsp_match(prices, members, ids, ex["crsp_daily"], crsp_last)
     reports = {
         "distributions_unpriced": unpriced,
         "crsp_factor_without_distribution": stray,
@@ -97,14 +96,26 @@ def assemble(
     return Built(prices, manifest, reports, summary)
 
 
+def permno_links(ids: pl.DataFrame) -> pl.DataFrame:
+    """(security_id, permno, vf, vt): from the universe table's `(security_id, date,
+    permno)`, the first and last date each security carries each PERMNO (a distribution on
+    a day without a row, inside that span, still counts)."""
+    return (
+        ids.drop_nulls("permno")
+        .group_by("security_id", "permno")
+        .agg(vf=pl.col("date").min(), vt=pl.col("date").max())
+    )
+
+
 def crsp_events(
-    dist: pl.DataFrame, daily: pl.DataFrame, sm: pl.DataFrame
+    dist: pl.DataFrame, daily: pl.DataFrame, links: pl.DataFrame
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """One row per (security_id, date) with a CRSP distribution ex-date of the PERMNO
-    linked on that date: `factor`, CRSP's whole day `|price| / (|previous price| × (1 +
-    total return))` (cash and stock dividends, splits, spinoffs and returns of capital
-    alike, and several on one day together), and `split_factor`, the product of `1 / (1 +
-    disfacshr)` over the day's distributions (the share part, for volume).
+    linked on that date (`permno_links`): `factor`, CRSP's whole day `|price| /
+    (|previous price| × (1 + total return))` (cash and stock dividends, splits, spinoffs
+    and returns of capital alike, and several on one day together), and `split_factor`,
+    the product of `1 / (1 + disfacshr)` over the day's distributions (the share part, for
+    volume).
 
     Distributions that end the security (`SECMRG`, `SECEX`, `SECMWM`) are skipped: its
     delisting return is the final value. Also returns the distribution days CRSP has no
@@ -120,9 +131,6 @@ def crsp_events(
         .agg(
             split_factor=pl.when(1 + shr > 0).then(1 / (1 + shr)).otherwise(1.0).product(),
         )
-    )
-    links = sm.filter(pl.col("id_type") == "permno").select(
-        "security_id", permno="value", vf="valid_from", vt=pl.col("valid_to").fill_null(FAR)
     )
     day = daily.select(
         permno=_permno("permno"),
@@ -196,13 +204,14 @@ def adjust(raw: pl.DataFrame, events: pl.DataFrame) -> pl.DataFrame:
 def crsp_match(
     prices: pl.DataFrame,
     members: pl.DataFrame,
-    sm: pl.DataFrame,
+    ids: pl.DataFrame,
     daily: pl.DataFrame,
     crsp_last: date,
 ) -> tuple[dict[str, float], pl.DataFrame]:
     """How often our adjusted close-to-close return matches CRSP's `dlyret` on member
-    sessions CRSP covers (where the security also had a bar the session before).
-    Returns aggregate shares and the rows off by more than REPORT_TOLERANCE."""
+    sessions CRSP covers (where the security also had a bar the session before), through
+    the PERMNO in `ids` (`security_id, date, permno`). Returns aggregate shares and the
+    rows off by more than REPORT_TOLERANCE."""
     axis = prices.select(pl.col("timestamp").unique().sort()).with_columns(
         prev_ts=pl.col("timestamp").shift(1)
     )
@@ -216,8 +225,9 @@ def crsp_match(
         )
         .filter(pl.col("day") <= crsp_last)
     )
+    permnos = ids.select(ticker="security_id", day="date", permno="permno")
     r = (
-        security_master.attach(r, sm, "permno", key="ticker", date="day")
+        r.join(permnos, on=["ticker", "day"])
         .join(
             daily.select(permno=_permno("permno"), day="dlycaldt", crsp_ret="dlyret"),
             on=["permno", "day"],

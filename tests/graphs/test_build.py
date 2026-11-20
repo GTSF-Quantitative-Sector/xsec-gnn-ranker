@@ -170,17 +170,22 @@ def test_no_target_node_on_any_date_raises(tmp_path, monkeypatch):
 
 
 def _universe_table(tmp_path) -> None:
-    """XLK joins at day 16; XLE leaves at day 21; XLF is always a member. mktcap ranks XLF,
-    XLK, XLE."""
+    """Every ETF trades all 30 days. XLK joins at day 16; XLE leaves at day 21; XLF is always
+    a member. mktcap ranks XLF, XLK, XLE."""
     caps = {"XLE": 1.0, "XLF": 3.0, "XLK": 2.0}
-    days = {"XLE": range(20), "XLF": range(30), "XLK": range(15, 30)}
-    rows = [(T0 + timedelta(days=i), k, T0.date(), k, 1.0, caps[k]) for k in days for i in days[k]]
+    member = {"XLE": range(20), "XLF": range(30), "XLK": range(15, 30)}
+    rows = [
+        (T0 + timedelta(days=i), k, T0.date(), i in member[k], k, 1.0, caps[k])
+        for k in member
+        for i in range(30)
+    ]
     table = pl.DataFrame(
         rows,
         schema={
             "timestamp": pl.Datetime("us", "America/New_York"),
             "security_id": pl.String,
             "list_date": pl.Date,
+            "member": pl.Boolean,
             "company": pl.String,
             "adv_63": pl.Float64,
             "mktcap": pl.Float64,
