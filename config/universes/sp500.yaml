@@ -1,7 +1,7 @@
 # The central equity universe: S&P 500 members, point in time (docs/CONTRACTS.md,
-# "Membership universes"). Build: gnns fetch-wrds, then gnns build-data.
+# "Membership universes"). Build: gnns fetch-wrds, gnns build-universe, gnns build-data.
+# Every share class on a list is a member; constructions narrow it with universe_filters.
 kind: membership
 source: datastream            # tr_ds_equities.ds2constmth (month-end lists)
 list_code: 4408               # S&P 500 (LS&PCOMP)
-one_class_per_company: true   # keep the most liquid share class of each company
-liquidity_window_bars: 126    # trailing window for "most liquid"
+adv_windows: [20, 63]         # trailing bars for the adv_<w> columns (mean dollar volume)

@@ -76,9 +76,11 @@ PostgreSQL interface with `psycopg2` (in `environment.yml`; after pulling, run
        gnns fetch-wrds
 
    This writes `<data_root>/wrds/<extract>/` (Datastream's S&P 500 lists, ticker, CUSIP and
-   name history; CRSP's security history, distributions, delistings and daily returns,
-   from `data.start` on). Run it again to refresh: Datastream updates monthly, CRSP
-   annually. `gnns build-data` only reads these files and never connects to WRDS.
+   name history; CRSP's security history of every share class of those companies,
+   distributions, delistings, and daily prices, returns and market caps, from `data.start`
+   on). Run it again to refresh: Datastream updates monthly, CRSP annually.
+   `gnns build-universe` and `gnns build-data` only read these files and never connect to
+   WRDS.
 
 ### CI
 
@@ -172,7 +174,7 @@ stage does, edit config, not code.
    ticker in a universe becomes a ranked graph node. `sp500`
    ([config/universes/sp500.yaml](config/universes/sp500.yaml)) is the central equity universe:
    S&P 500 members point in time (see "The sp500 universe" below). It needs
-   `gnns fetch-wrds` first (WRDS access, above).
+   `gnns fetch-wrds` (WRDS access, above) and `gnns build-universe` first.
 2. Set the `data` block in `config/config.yaml`:
 
        data:
@@ -182,9 +184,9 @@ stage does, edit config, not code.
            - benchmarks
          bar: 1d            # shared by every universe; only 1d is supported so far
          start: 2010-01-01
-         end: 2026-06-30    # inclusive
+         end: 2025-12-31    # inclusive; at most CRSP's last date while sp500 is built
 
-3. Run `gnns build-data`.
+3. Run `gnns build-data` (for `sp500`, after `gnns build-universe`).
 
 This writes `<data_root>/<universe>/<bar>/prices.parquet` and `manifest.json` for each
 universe (schema in [docs/CONTRACTS.md](docs/CONTRACTS.md)). Prices are adjusted for splits
@@ -201,33 +203,49 @@ They are validated together with the universes, so a failure in either writes no
 
 #### The sp500 universe
 
-`gnns build-data` builds `sp500` from the cached WRDS extracts and Massive (about 90 s):
-membership from Datastream's month-end S&P 500 lists, keyed by Datastream infocode
-(`security_id`, stored in the `ticker` column); Massive's unadjusted daily bars, fetched by
-the ticker each security had on each date and adjusted by our own split, dividend and
-spinoff factors; and CRSP's delisting returns. Rules: [docs/CONTRACTS.md](docs/CONTRACTS.md),
-"Membership universes" and "Security master". It writes:
+Three commands, each run once and stored (rerun only to change the data):
 
-- `<data_root>/sp500/1d/` prices, `<data_root>/sp500/membership/` membership intervals,
-  `<data_root>/sp500/delistings/` final returns of securities that stop trading,
-  `<data_root>/security_master/` the dated identifier table (infocode, CUSIP, PERMNO,
-  tickers, ...);
-- `<data_root>/sp500/reports/*.csv`: review reports (symbol gaps, odd split ratios,
-  unexplained price jumps, CRSP-return mismatches, delistings at the last trade, ...).
-  The build prints a summary, including how often its daily returns match CRSP's.
+    gnns fetch-wrds       # WRDS extracts -> <data_root>/wrds/ (about 30 s, one Duo approval)
+    gnns build-universe   # universe table, raw bars, delistings, security master (about 1 min)
+    gnns build-data       # adjusted prices, plus the other universes (seconds for sp500)
 
-The build fails, listing the securities, if the identifier table breaks an invariant (a
-ticker shared by two securities on a date) or a member has more than 5 sessions in a row
-without a Massive symbol. Fix those, and anything a report shows, in the two reviewed,
-tracked override files, then rebuild:
+`gnns build-universe` builds the **universe table**, `<data_root>/sp500/universe/`: one row
+per member per session, every share class included, from Datastream's month-end S&P 500
+lists. Each row carries the security's identifiers on that date (`security_id` = Datastream
+infocode; Massive, Datastream and CRSP tickers; CUSIP, ISIN, company, PERMNO, PERMCO), the
+list it follows (`list_date`), `dollar_volume` (Massive VWAP × volume), its trailing means
+`adv_20` and `adv_63` (windows in [config/universes/sp500.yaml](config/universes/sp500.yaml)),
+and `mktcap` (CRSP, summed over the company's share classes). Read it with
+`gnns.data.universe.load(root, "sp500")`. It also writes:
 
-- [config/universes/security_overrides.csv](config/universes/security_overrides.csv):
-  `security_id, id_type, value, valid_from, valid_to, note` replaces derived identifier
-  rows on the dates it covers (an empty `value` removes them); e.g. a `ticker_massive` row
-  for a ticker Datastream's history misses.
-- [config/universes/adjustment_overrides.csv](config/universes/adjustment_overrides.csv):
-  `security_id, ex_date, factor, note` adds a spinoff factor after CRSP's last date (CRSP's
-  own factor replaces it once CRSP covers the date).
+- `<data_root>/sp500/raw_bars/`: Massive's unadjusted daily bars of every security, fetched
+  by the ticker it had on each date, ending at a delisted security's last CRSP trading day;
+- `<data_root>/sp500/delistings/`: CRSP's delisting return of each security that stops;
+- `<data_root>/security_master/`: the dated identifier table the columns come from;
+- `<data_root>/sp500/reports/universe/*.csv`: review reports (symbol and bar gaps, bars cut
+  after a delisting, sessions without a PERMNO or a market cap, ...).
+
+`gnns build-data` then adjusts the raw bars with CRSP's factor on every CRSP distribution
+date (dividends, splits, spinoffs alike) into `<data_root>/sp500/1d/`, and writes
+`<data_root>/sp500/reports/prices/*.csv` (including how often daily returns match CRSP's).
+The data ends at CRSP's last date (2025-12-31 now): both commands refuse a later `data.end`.
+
+A construction narrows the universe in its graph file with `universe_filters`, applied in
+order on each session (`gnns.data.restrict`):
+
+    universe: sp500
+    universe_filters:
+      - one_class_per_company: {by: adv_63}   # most liquid class, decided at each list
+      - top_n: {by: mktcap, n: 100}           # any column: adv_20, adv_63, mktcap, ...
+
+Rules: [docs/CONTRACTS.md](docs/CONTRACTS.md), "Membership universes" and "Security master".
+`gnns build-universe` fails, listing the securities, if the identifier table breaks an
+invariant (a ticker shared by two securities on a date) or a member has more than 5 sessions
+in a row without a Massive symbol. Fix those, and anything a report shows, in the reviewed,
+tracked [config/universes/security_overrides.csv](config/universes/security_overrides.csv):
+`security_id, id_type, value, valid_from, valid_to, note` replaces derived identifier rows on
+the dates it covers (an empty `value` removes them); e.g. a `ticker_massive` row for a
+ticker Datastream's history misses. Then rerun `gnns build-universe` and `gnns build-data`.
 
 Every dataset, including a construction's extra sources, is a folder with its data file and
 one `manifest.json` (source, file, rows, sha256, build time, git SHA). **Datasets built
@@ -240,8 +258,9 @@ polars `LazyFrame` of prices; `gnns.data.store.open(folder)` returns any dataset
 
 ### Build graph snapshots
 
-Needs the construction's universe built first (`gnns build-data`), plus any extra datasets
-its doc lists (built by the same command while the construction is selected).
+Needs the construction's universe built first (`gnns build-data`, after `gnns
+build-universe` for `sp500`), plus any extra datasets its doc lists (built by the same
+command while the construction is selected).
 
 Available constructions:
 

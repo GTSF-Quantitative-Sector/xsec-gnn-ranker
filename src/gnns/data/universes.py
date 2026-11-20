@@ -3,7 +3,7 @@
 A universe file has a `kind` (docs/CONTRACTS.md, "Storage layout"):
 - `list`: fixed `tickers`; every ticker is a node on every date it has a bar.
 - `membership`: members change over time ("Membership universes"); the file names the
-  constituent list and how to turn it into nodes.
+  constituent list and the trailing windows of its `adv_<w>` columns (`adv_windows`).
 """
 
 from pathlib import Path
@@ -29,4 +29,8 @@ def spec(name: str, config_dir: Path = CONFIG_DIR) -> dict:
             raise ValueError(f"{path}: a list universe needs a non-empty list of tickers")
         if dupes := sorted({t for t in tickers if tickers.count(t) > 1}):
             raise ValueError(f"{path}: duplicate tickers {dupes}")
+    else:
+        w = s.get("adv_windows", [20, 63])
+        if not w or not all(isinstance(x, int) and x > 0 for x in w) or len(set(w)) < len(w):
+            raise ValueError(f"{path}: adv_windows must be distinct positive integers, got {w!r}")
     return s

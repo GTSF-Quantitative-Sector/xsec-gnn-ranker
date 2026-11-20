@@ -51,14 +51,18 @@ def _request(url: str, params: dict, headers: dict) -> requests.Response:
     raise AssertionError("unreachable")
 
 
-def daily_bars(ticker: str, start: date, end: date, adjusted: bool = True) -> pl.DataFrame:
+def daily_bars(
+    ticker: str, start: date, end: date, adjusted: bool = True, vwap: bool = False
+) -> pl.DataFrame:
     """Daily bars, split-adjusted unless `adjusted=False`, stamped 16:00 ET (bar end, per
-    CONTRACTS.md)."""
+    CONTRACTS.md). With `vwap`, also the day's volume-weighted average price (null where
+    Massive gives none)."""
     rows = _get(
         f"/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}",
         {"adjusted": str(adjusted).lower(), "sort": "asc", "limit": 50000},
     )
-    schema = {c: pl.Float64 for c in "ohlcv"} | {"t": pl.Int64}
+    schema = {c: pl.Float64 for c in ("o", "h", "l", "c", "v", "vw")} | {"t": pl.Int64}
+    extra = [pl.col("vw").alias("vwap")] if vwap else []
     return pl.DataFrame(rows, schema=schema).select(
         pl.from_epoch("t", time_unit="ms")  # `t` is the bar start, Unix ms UTC
         .dt.replace_time_zone("UTC")
@@ -73,6 +77,7 @@ def daily_bars(ticker: str, start: date, end: date, adjusted: bool = True) -> pl
         pl.col("l").alias("low"),
         pl.col("c").alias("close"),
         pl.col("v").alias("volume"),
+        *extra,
     )
 
 

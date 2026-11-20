@@ -2,7 +2,8 @@
 
 `gnns fetch-wrds` is the only command that connects (each connection may wait for a Duo
 approval). It writes every extract as a dataset under `<data_root>/wrds/<name>/`
-(docs/CONTRACTS.md, "Storage layout"); `gnns build-data` only reads them. Credentials come
+(docs/CONTRACTS.md, "Storage layout"); `gnns build-universe` and `gnns build-data` only
+read them. Credentials come
 from `.env` (`WRDS_USERNAME`, `WRDS_PASSWORD`; README, "WRDS access").
 
 Extracts are raw source rows, never modified here. Dates stay as the source writes them
@@ -113,11 +114,14 @@ def _by_infocode(table: str, cols: str) -> Callable[[object, dict], pl.DataFrame
 
 
 def _crsp_security(cur, ctx: dict) -> pl.DataFrame:
+    # Every security of each matched company (PERMCO), so a company's market cap can sum
+    # share classes that are not on the list themselves.
     df = query(
         cur,
         "SELECT permno, permco, secinfostartdt, secinfoenddt, cusip, ticker, shareclass, "
-        "sharetype, securitytype FROM crsp.stksecurityinfohist "
-        "WHERE left(cusip, 8) = ANY(%(cusips)s)",
+        "sharetype, securitytype, securitysubtype FROM crsp.stksecurityinfohist "
+        "WHERE permco IN (SELECT permco FROM crsp.stksecurityinfohist "
+        "WHERE left(cusip, 8) = ANY(%(cusips)s))",
         {"cusips": ctx["cusips"]},
     )
     ctx["permnos"] = sorted(int(p) for p in df["permno"].unique())
@@ -173,7 +177,8 @@ EXTRACTS: list[tuple[str, str, Callable[[object, dict], pl.DataFrame]]] = [
         "crsp_daily",
         "crsp.dsf_v2",
         _by_permno(
-            "SELECT permno, dlycaldt, dlyret, dlyprc, dlyprevprc FROM crsp.dsf_v2 "
+            "SELECT permno, permco, dlycaldt, dlyret, dlyprc, dlyprevprc, dlycap, dlydelflg, "
+            "securitytype, securitysubtype, sharetype FROM crsp.dsf_v2 "
             "WHERE permno = ANY(%(ids)s) AND dlycaldt >= %(start)s"
         ),
     ),

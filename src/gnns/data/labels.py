@@ -74,8 +74,8 @@ def forward_returns(
 
 
 def load_delistings(root: Path, universe: str) -> pl.DataFrame | None:
-    """A membership universe's delistings (`ticker, last_bar, delret, source,
-    provisional`), or None for a universe without one (list universes)."""
+    """A membership universe's delistings (`ticker, last_bar, delret`), or None for a
+    universe without one (list universes)."""
     dest = root / universe / "delistings"
     if not (dest / "manifest.json").exists():
         return None

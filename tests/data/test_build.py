@@ -91,58 +91,81 @@ def test_failed_universe_writes_no_source(setup, monkeypatch):
 
 
 def _membership_universe(tmp_path, monkeypatch, fail: bool = False):
-    """A membership universe whose (Massive + WRDS) build is stubbed."""
-    import gnns.data.equities as equities
-    from gnns.data import membership
+    """A membership universe whose universe build (Massive + WRDS) and adjustment are
+    stubbed."""
+    from gnns.data import adjustment, universe
     from gnns.data import security_master as smod
 
     (tmp_path / "config" / "universes" / "m.yaml").write_text(
         "kind: membership\nsource: datastream\nlist_code: 4408\n"
     )
     real = massive.daily_bars("U1", START, END)
+    reports = {"needs_a_look": pl.DataFrame({"x": [1]}), "empty": pl.DataFrame({"x": []})}
 
-    def fake(universe, spec, start, end, root, config_dir):
+    def fake_universe(name, spec, start, end, root, config_dir):
         if fail:
             raise ValueError("member sessions without a Massive symbol")
-        return equities.Built(
-            prices=real.with_columns(ticker=pl.lit("7")),
-            membership=pl.DataFrame(
-                {"security_id": ["7"], "start": [real["timestamp"].min()], "end": [None]},
-                schema=membership.SCHEMA,
-            ),
+        return universe.Built(
+            universe=pl.DataFrame({"timestamp": real["timestamp"], "security_id": "7"}),
+            raw_bars=real.with_columns(security_id=pl.lit("7")),
             security_master=pl.DataFrame(schema=smod.SCHEMA),
             delistings=pl.DataFrame({"ticker": ["7"], "delret": [0.0]}),
             manifests={
                 k: {"source": "test"}
-                for k in ("prices", "membership", "security_master", "delistings")
+                for k in ("universe", "raw_bars", "security_master", "delistings")
             },
-            reports={"needs_a_look": pl.DataFrame({"x": [1]}), "empty": pl.DataFrame({"x": []})},
+            reports=reports,
         )
 
-    monkeypatch.setattr(equities, "build", fake)
+    def fake_adjustment(name, start, end, root):
+        if fail:
+            raise ValueError("run gnns build-universe first")
+        prices = real.with_columns(ticker=pl.lit("7"))
+        return adjustment.Built(prices, {"source": "test", "tickers": ["7"]}, reports)
+
+    monkeypatch.setattr(universe, "build", fake_universe)
+    monkeypatch.setattr(adjustment, "build", fake_adjustment)
 
 
-def test_membership_universe_writes_its_datasets_and_reports(setup, tmp_path, monkeypatch):
+def test_build_universe_writes_its_datasets_and_reports(setup, tmp_path, monkeypatch):
     cfg, root, _ = setup
     _membership_universe(tmp_path, monkeypatch)
     cfg["data"]["universes"] = ["m", "u"]
-    dests = build.build(cfg)
+    dests = build.build_universe(cfg)
     assert dests == [
-        root / "m" / "1d",
-        root / "m" / "membership",
+        root / "m" / "universe",
+        root / "m" / "raw_bars",
         root / "m" / "delistings",
         root / "security_master",
-        root / "u" / "1d",
     ]
     for d in dests:
         assert json.loads((d / "manifest.json").read_text())["git_sha"] == "test"
-    assert sorted(p.name for p in (root / "m" / "reports").iterdir()) == ["needs_a_look.csv"]
+    reports = root / "m" / "reports" / "universe"
+    assert sorted(p.name for p in reports.iterdir()) == ["needs_a_look.csv"]
+    assert not (root / "u").exists()  # list universes have no universe build
 
 
-def test_failed_membership_universe_writes_nothing(setup, tmp_path, monkeypatch):
+def test_build_universe_needs_a_membership_universe(setup):
+    cfg, _, _ = setup
+    with pytest.raises(ValueError, match="no membership universe"):
+        build.build_universe(cfg)
+
+
+def test_build_data_adjusts_a_membership_universe(setup, tmp_path, monkeypatch):
+    cfg, root, _ = setup
+    _membership_universe(tmp_path, monkeypatch)
+    cfg["data"]["universes"] = ["m", "u"]
+    assert build.build(cfg) == [root / "m" / "1d", root / "u" / "1d"]
+    manifest = json.loads((root / "m" / "1d" / "manifest.json").read_text())
+    assert manifest["universe"] == "m" and manifest["tickers"] == ["7"]
+    assert (root / "m" / "reports" / "prices" / "needs_a_look.csv").exists()
+
+
+@pytest.mark.parametrize("command", ["build", "build_universe"])
+def test_a_failed_membership_universe_writes_nothing(setup, tmp_path, monkeypatch, command):
     cfg, root, _ = setup
     _membership_universe(tmp_path, monkeypatch, fail=True)
     cfg["data"]["universes"] = ["u", "m"]
-    with pytest.raises(ValueError, match="without a Massive symbol"):
-        build.build(cfg)
+    with pytest.raises(ValueError):
+        getattr(build, command)(cfg)
     assert not root.exists()

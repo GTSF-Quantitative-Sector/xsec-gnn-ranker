@@ -48,3 +48,10 @@ def test_invalid_definitions_raise(tmp_path, text, match):
 def test_missing_definition_names_the_path(tmp_path):
     with pytest.raises(FileNotFoundError, match="no definition at"):
         universes.spec("nope", tmp_path)
+
+
+@pytest.mark.parametrize("windows", ["[]", "[0, 63]", "[20, 20]", "[20.5]"])
+def test_membership_adv_windows_must_be_distinct_positive_integers(tmp_path, windows):
+    d = _write(tmp_path, "m", f"kind: membership\nlist_code: 4408\nadv_windows: {windows}\n")
+    with pytest.raises(ValueError, match="adv_windows"):
+        universes.spec("m", d)

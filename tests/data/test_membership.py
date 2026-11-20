@@ -1,13 +1,11 @@
-"""Membership universes: month-end lists -> intervals, one class per company, the mask."""
+"""Membership universes: month-end lists -> intervals -> member sessions."""
 
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import polars as pl
 
-from gnns.data import membership, store
-from gnns.data import security_master as smod
-from tests.data.test_store import MANIFEST
+from gnns.data import membership
 
 NY = ZoneInfo("America/New_York")
 J, F, M, A = date(2020, 1, 31), date(2020, 2, 28), date(2020, 3, 31), date(2020, 4, 30)
@@ -62,41 +60,6 @@ def test_member_rows_include_start_and_exclude_end():
     )
     ts = pl.Series([_close(J), _close(F), _close(M)])
     assert membership.member_rows(iv, ts)["timestamp"].to_list() == [_close(J), _close(F)]
-
-
-def test_keep_one_class_keeps_the_most_liquid_and_reports_the_rest():
-    members = pl.DataFrame({"list_date": [J, J, J], "security_id": ["A", "B", "C"]})
-    company = pl.DataFrame(
-        [
-            ("A", "company", "9", date(2000, 1, 1), None, "d"),
-            ("B", "company", "9", date(2000, 1, 1), None, "d"),
-        ],
-        schema=smod.SCHEMA,
-        orient="row",
-    )
-    liq = pl.DataFrame(
-        {
-            "date": [date(2020, 1, 30), date(2020, 1, 30), date(2020, 1, 30)],
-            "security_id": ["A", "B", "C"],
-            "dollar_volume": [1.0, 5.0, 2.0],
-        }
-    )
-    kept, dropped = membership.keep_one_class(members, company, liq, 126)
-    assert kept["security_id"].to_list() == ["B", "C"]
-    assert dropped.rows() == [(J, "A", "B")]
-    assert membership.company_duplicates(kept, company).is_empty()
-    assert membership.company_duplicates(members, company).rows() == [(J, "9")]
-
-
-def test_mask_is_empty_for_a_list_universe_and_reads_the_dataset_otherwise(tmp_path):
-    axis = pl.Series([_close(J), _close(F)])
-    assert membership.mask(tmp_path, "etfs", axis).is_empty()
-    iv = pl.DataFrame(
-        {"security_id": ["7"], "start": [_close(F)], "end": [None]}, schema=membership.SCHEMA
-    )
-    store.write(iv, tmp_path / "u" / "membership", MANIFEST, file="membership.parquet")
-    assert membership.exists(tmp_path, "u")
-    assert membership.mask(tmp_path, "u", axis).rows() == [(_close(F), "7")]
 
 
 def test_membership_at_t_uses_only_lists_known_by_t():

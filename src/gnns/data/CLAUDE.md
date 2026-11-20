@@ -22,19 +22,30 @@ writes; `build()` writes every universe and source only after all of them valida
   construction's tradeable nodes are it or a subset of it.
 - `wrds.py` is the only module that connects to WRDS (`gnns fetch-wrds`, Duo); it caches
   raw extracts under `<data_root>/wrds/`. Everything else reads the cache.
-- `equities.py` builds a membership universe: `fetch_massive` (network) then `assemble`
-  (pure, tested on fixtures). Steps: security master (`security_master.py`) -> one
-  Massive symbol per session (`assign_symbols`: continuity decides ticker handovers) ->
-  membership (`membership.py`: month-end lists, placeholders dropped, one class per
-  company) -> event factors (Massive splits/dividends, CRSP spinoffs, overrides) ->
-  adjusted prices -> delistings -> checks and review reports.
-- `security_id` = Datastream infocode, stored in `ticker`. Code translates identifiers
-  through the security master on the date in question, never by joining raw tickers.
-- Fixes are data, never code: `config/universes/security_overrides.csv` and
-  `adjustment_overrides.csv`, each row with a note.
+- Sources: Datastream for membership and identifiers; CRSP for PERMNO links, every
+  adjustment factor, delisting returns and market cap; Massive for the bars only (raw,
+  `adjusted=false`). The data ends at CRSP's last date (#24 extends it).
+- `universe.py` (`gnns build-universe`): `fetch_bars` (network) then `assemble` (pure,
+  fixtures). Steps: security master (`security_master.py`) -> one Massive symbol per
+  session (`assign_symbols`: continuity decides ticker handovers) -> raw bars, cut at a
+  delisted security's last CRSP trading day -> membership (`membership.py`: month-end lists,
+  placeholders dropped, every share class) -> the universe table (ids, dollar volume, adv,
+  company mktcap) -> delistings -> reports.
+- `adjustment.py` (`gnns build-data`): raw bars × CRSP's whole-day factor on each
+  distribution date -> prices, plus the CRSP-match check. No network.
+- `restrict.py`: filters a construction applies to the universe table (`universe_filters`
+  in its graph file). The table keeps everything; selection never happens in the build.
+- `security_id` = Datastream infocode, stored in `ticker` (prices) / `security_id`
+  (universe table). Code translates identifiers through the security master on the date in
+  question, never by joining raw tickers.
+- Fixes are data, never code: `config/universes/security_overrides.csv`, each row with a
+  note.
+- The universe modules are meant to move to their own package later (reused across
+  projects): keep `security_master`, `membership`, `restrict` free of gnns-specific
+  imports, and pass paths and specs in explicitly.
 - WRDS AI rules: Datastream (LSEG) rows may be inspected; CRSP data stays aggregate-only in
   an agent's context. Build output names securities by infocode and prints CRSP only as
-  aggregates; the CRSP-derived review reports are for a person.
+  aggregates; the CRSP-derived review reports, and the table's `mktcap`, are for a person.
 
 ## FeatureEngine decisions
 

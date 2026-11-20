@@ -169,20 +169,30 @@ def test_no_target_node_on_any_date_raises(tmp_path, monkeypatch):
         build_snapshots(cfg)
 
 
-def test_a_membership_universe_only_has_members_as_nodes(tmp_path):
-    from gnns.data import membership
-
-    cfg = _cfg(tmp_path)
-    # XLK joins at day 16; XLE leaves at day 21 (exclusive end); XLF is always a member.
-    iv = pl.DataFrame(
-        {
-            "security_id": ["XLE", "XLF", "XLK"],
-            "start": [T0, T0, T0 + timedelta(days=15)],
-            "end": [T0 + timedelta(days=20), None, None],
+def _universe_table(tmp_path) -> None:
+    """XLK joins at day 16; XLE leaves at day 21; XLF is always a member. mktcap ranks XLF,
+    XLK, XLE."""
+    caps = {"XLE": 1.0, "XLF": 3.0, "XLK": 2.0}
+    days = {"XLE": range(20), "XLF": range(30), "XLK": range(15, 30)}
+    rows = [(T0 + timedelta(days=i), k, T0.date(), k, 1.0, caps[k]) for k in days for i in days[k]]
+    table = pl.DataFrame(
+        rows,
+        schema={
+            "timestamp": pl.Datetime("us", "America/New_York"),
+            "security_id": pl.String,
+            "list_date": pl.Date,
+            "company": pl.String,
+            "adv_63": pl.Float64,
+            "mktcap": pl.Float64,
         },
-        schema=membership.SCHEMA,
+        orient="row",
     )
-    store.write(iv, tmp_path / "etfs" / "membership", MANIFEST, file="membership.parquet")
+    store.write(table, tmp_path / "etfs" / "universe", MANIFEST, file="universe.parquet")
+
+
+def test_a_membership_universe_only_has_members_as_nodes(tmp_path):
+    cfg = _cfg(tmp_path)
+    _universe_table(tmp_path)
     snaps, _, _ = build_snapshots(cfg)
     nodes = {s.timestamp.day: sorted(s.node_ids.tolist()) for s in snaps}
     assert nodes == {
@@ -192,3 +202,18 @@ def test_a_membership_universe_only_has_members_as_nodes(tmp_path):
         21: ["XLF", "XLK"],
         26: ["XLF", "XLK"],
     }
+
+
+def test_universe_filters_narrow_the_nodes(tmp_path):
+    cfg = _cfg(tmp_path)
+    _universe_table(tmp_path)
+    cfg["graph"]["universe_filters"] = [{"top_n": {"by": "mktcap", "n": 2}}]
+    nodes = {s.timestamp.day: sorted(s.node_ids.tolist()) for s in build_snapshots(cfg).snapshots}
+    assert nodes[11] == ["XLE", "XLF"] and nodes[16] == ["XLF", "XLK"]
+
+
+def test_universe_filters_need_a_membership_universe(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["graph"]["universe_filters"] = [{"top_n": {"by": "mktcap", "n": 2}}]
+    with pytest.raises(ValueError, match="need a membership universe"):
+        build_snapshots(cfg)

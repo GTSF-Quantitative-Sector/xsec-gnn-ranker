@@ -1,5 +1,6 @@
-"""Membership universes: who is a member when. Contract: docs/CONTRACTS.md,
-"Membership universes".
+"""Membership universes: who is a member when, from a source's dated lists. Contract:
+docs/CONTRACTS.md, "Membership universes" (the universe table is built from these
+intervals by `gnns.data.universe`).
 
 A source list dated `d` (a month-end trading day) is known at `d` 16:00 ET. A security is
 a member at `t` when `start <= t < end`: `start` is 16:00 on the first list date of a run
@@ -8,12 +9,10 @@ is on the latest list).
 """
 
 from datetime import date, datetime, time
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import polars as pl
 
-from gnns.data import store
 from gnns.data.security_master import security_ids
 
 TZ = "America/New_York"
@@ -53,78 +52,6 @@ def list_members(
         .select("list_date", "security_id")
         .unique()
         .sort("list_date", "security_id")
-    )
-
-
-def keep_one_class(
-    members: pl.DataFrame, company: pl.DataFrame, liquidity: pl.DataFrame, window: int
-) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Keep one security per company on each list: the highest median unadjusted
-    close × volume over the `window` bars ending at the list date.
-
-    `company`: security-master rows of id_type `company`. `liquidity`:
-    `(date, security_id, dollar_volume)` from unadjusted bars. Returns the kept members
-    and the dropped `(list_date, security_id, kept)` rows.
-    """
-    med = (
-        liquidity.sort("security_id", "date")
-        .with_columns(
-            med=pl.col("dollar_volume").rolling_median(window, min_samples=1).over("security_id")
-        )
-        .select("security_id", "date", "med")
-    )
-    comp = company.select("security_id", co="value", f="valid_from", t="valid_to")
-    m = (
-        members.join(comp, on="security_id", how="left")
-        .filter(
-            pl.col("co").is_null()
-            | (
-                (pl.col("f") <= pl.col("list_date"))
-                & (pl.col("t").is_null() | (pl.col("t") >= pl.col("list_date")))
-            )
-        )
-        .unique(["list_date", "security_id"], keep="first")
-        .with_columns(co=pl.col("co").fill_null(pl.col("security_id")))
-        .sort("list_date")
-        .join_asof(
-            med.sort("date"),
-            left_on="list_date",
-            right_on="date",
-            by="security_id",
-            strategy="backward",
-            check_sortedness=False,
-        )
-        .with_columns(
-            rank=pl.struct(pl.col("med").fill_null(-1.0), "security_id")
-            .rank("ordinal", descending=True)
-            .over("list_date", "co")
-        )
-    )
-    kept = m.filter(pl.col("rank") == 1).select("list_date", "security_id")
-    winner = kept.join(m.select("list_date", "security_id", "co"), on=["list_date", "security_id"])
-    dropped = (
-        m.filter(pl.col("rank") > 1)
-        .select("list_date", "security_id", "co")
-        .join(winner.rename({"security_id": "kept"}), on=["list_date", "co"])
-        .select("list_date", "security_id", "kept")
-    )
-    return kept.sort("list_date", "security_id"), dropped.sort("list_date", "security_id")
-
-
-def company_duplicates(members: pl.DataFrame, company: pl.DataFrame) -> pl.DataFrame:
-    """(list_date, co) for every list on which two members share a company code."""
-    comp = company.select("security_id", co="value", f="valid_from", t="valid_to")
-    return (
-        members.join(comp, on="security_id")
-        .filter(
-            (pl.col("f") <= pl.col("list_date"))
-            & (pl.col("t").is_null() | (pl.col("t") >= pl.col("list_date")))
-        )
-        .group_by("list_date", "co")
-        .agg(n=pl.col("security_id").n_unique())
-        .filter(pl.col("n") > 1)
-        .select("list_date", "co")
-        .sort("list_date", "co")
     )
 
 
@@ -190,17 +117,3 @@ def member_rows(iv: pl.DataFrame, timestamps: pl.Series) -> pl.DataFrame:
         .unique()
         .sort("timestamp", "ticker")
     )
-
-
-def mask(root: Path, universe: str, axis: pl.Series) -> pl.DataFrame:
-    """(timestamp, ticker) for every bar-axis timestamp at which each security is a
-    member; empty for list universes, which have no membership dataset."""
-    dest = root / universe / "membership"
-    if not (dest / "manifest.json").exists():
-        return pl.DataFrame(schema={"timestamp": axis.dtype, "ticker": pl.String})
-    lf, _ = store.open(dest)
-    return member_rows(lf.collect(), axis)
-
-
-def exists(root: Path, universe: str) -> bool:
-    return (root / universe / "membership" / "manifest.json").exists()

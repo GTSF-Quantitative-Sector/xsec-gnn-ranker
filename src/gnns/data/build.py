@@ -1,12 +1,16 @@
 """Build the configured datasets: fetch -> adjust -> validate -> write.
 
-Shared datasets are the universes in `data.universes`: a list universe is one price
-dataset; a membership universe (`gnns.data.equities`) is its prices, membership and
-delistings plus the global security master, built from the cached WRDS extracts
-(`gnns fetch-wrds`), with review reports in `<data_root>/<universe>/reports/`. A
-construction's extra datasets are the selected graph's `sources:` entries that name a
-`kind` in `SOURCES`; each kind's function fetches and validates its dataset and returns
-it unwritten.
+Two commands, each all-or-nothing (everything validates before the first write):
+- `gnns build-universe` (`build_universe`): each membership universe in `data.universes`
+  (`gnns.data.universe`) from the cached WRDS extracts (`gnns fetch-wrds`) and Massive's
+  unadjusted bars: its universe table, raw bars and delistings, and the global security
+  master, with review reports in `<data_root>/<universe>/reports/universe/`.
+- `gnns build-data` (`build`): every universe's prices, plus the selected graph's buildable
+  sources. A list universe is fetched from Massive; a membership universe's prices are its
+  raw bars × CRSP's factors (`gnns.data.adjustment`), with reports in
+  `<data_root>/<universe>/reports/prices/`. A construction's extra datasets are the
+  selected graph's `sources:` entries that name a `kind` in `SOURCES`; each kind's function
+  fetches and validates its dataset and returns it unwritten.
 """
 
 import logging
@@ -17,7 +21,7 @@ from pathlib import Path
 import polars as pl
 
 from gnns.config import CONFIG_DIR, ROOT, git_sha
-from gnns.data import equities, macro, massive, store, universes
+from gnns.data import adjustment, macro, massive, store, universe, universes
 
 log = logging.getLogger(__name__)
 
@@ -25,57 +29,72 @@ log = logging.getLogger(__name__)
 SOURCES: dict[str, Callable[[dict, date, date], tuple[pl.DataFrame, dict]]] = {
     "macro": macro.fetch_macro,
 }
+Pending = list[tuple[Path, pl.DataFrame, dict, str]]  # (dest, data, manifest, file)
 
 
 def build(cfg: dict) -> list[Path]:
-    """Build every universe in `data.universes` on the shared bar size and date range,
-    plus the selected graph's buildable sources (`buildable_sources`).
+    """Build every universe's prices in `data.universes` on the shared bar size and date
+    range, plus the selected graph's buildable sources (`buildable_sources`).
 
     Everything is fetched and validated before anything is written, so a failure in one
     dataset leaves every existing dataset untouched.
     """
-    bar, start, end = cfg["data"]["bar"], cfg["data"]["start"], cfg["data"]["end"]
-    if bar != "1d":
-        raise NotImplementedError(f"bar {bar!r}: only 1d so far (see CONTRACTS.md open questions)")
+    bar, start, end = _window(cfg)
     specs = buildable_sources(cfg)  # before any download, so a bad kind costs nothing
-
-    built_at, sha = datetime.now(UTC).isoformat(), git_sha()
     root = ROOT / cfg["data_root"]
-    stamp = {"built_at": built_at, "git_sha": sha}
+    stamp = {"built_at": datetime.now(UTC).isoformat(), "git_sha": git_sha()}
     window = {"bar": bar, "start": str(start), "end": str(end)}
-    # (dest, data, manifest, file), all validated before the first write.
-    pending: list[tuple[Path, pl.DataFrame, dict, str]] = []
+    pending: Pending = []
     reports: dict[Path, dict[str, pl.DataFrame]] = {}
-    for universe in cfg["data"]["universes"]:
-        spec = universes.spec(universe, CONFIG_DIR)
+    for name in cfg["data"]["universes"]:
+        spec = universes.spec(name, CONFIG_DIR)
         if spec["kind"] == "list":
             tickers, prices = _fetch(spec["tickers"], start, end)
-            manifest = {"source": "massive", "universe": universe, "tickers": tickers}
-            pending.append(
-                (root / universe / bar, prices, manifest | window | stamp, "prices.parquet")
-            )
+            manifest = {"source": "massive", "universe": name, "tickers": tickers}
+            pending.append((root / name / bar, prices, manifest | window | stamp, "prices.parquet"))
             continue
-        b = equities.build(universe, spec, start, end, root, CONFIG_DIR)
+        b = adjustment.build(name, start, end, root)
         for line in b.summary:
-            log.info("%s: %s", universe, line)
+            log.info("%s: %s", name, line)
+        manifest = b.manifest | {"universe": name} | window | stamp
+        pending.append((root / name / bar, b.prices, manifest, "prices.parquet"))
+        reports[root / name / "reports" / "prices"] = b.reports
+    for name, spec in specs.items():
+        df, extras = SOURCES[spec["kind"]](spec, start, end)
+        pending.append((root / spec["path"], df, extras | window | stamp, f"{name}.parquet"))
+    return _write(pending, reports)
+
+
+def build_universe(cfg: dict) -> list[Path]:
+    """Build each membership universe in `data.universes`: its universe table, raw bars
+    and delistings, and the security master. Raises if none is configured."""
+    _, start, end = _window(cfg)
+    root = ROOT / cfg["data_root"]
+    names = [
+        n for n in cfg["data"]["universes"] if universes.spec(n, CONFIG_DIR)["kind"] == "membership"
+    ]
+    if not names:
+        raise ValueError("data.universes has no membership universe to build")
+    if len(names) > 1:
+        raise NotImplementedError(
+            f"membership universes {names}: one at a time so far (they share one security "
+            "master; see docs/CONTRACTS.md open questions)"
+        )
+    stamp = {"built_at": datetime.now(UTC).isoformat(), "git_sha": git_sha()}
+    pending: Pending = []
+    reports: dict[Path, dict[str, pl.DataFrame]] = {}
+    for name in names:
+        b = universe.build(name, universes.spec(name, CONFIG_DIR), start, end, root, CONFIG_DIR)
+        for line in b.summary:
+            log.info("%s: %s", name, line)
         m = b.manifests
         pending += [
+            (root / name / "universe", b.universe, m["universe"] | stamp, "universe.parquet"),
+            (root / name / "raw_bars", b.raw_bars, m["raw_bars"] | stamp, "raw_bars.parquet"),
             (
-                root / universe / bar,
-                b.prices,
-                m["prices"] | {"universe": universe} | window | stamp,
-                "prices.parquet",
-            ),
-            (
-                root / universe / "membership",
-                b.membership,
-                m["membership"] | stamp,
-                "membership.parquet",
-            ),
-            (
-                root / universe / "delistings",
+                root / name / "delistings",
                 b.delistings,
-                m["delistings"] | {"universe": universe} | stamp,
+                m["delistings"] | stamp,
                 "delistings.parquet",
             ),
             (
@@ -85,11 +104,18 @@ def build(cfg: dict) -> list[Path]:
                 "security_master.parquet",
             ),
         ]
-        reports[root / universe / "reports"] = b.reports
-    for name, spec in specs.items():
-        df, extras = SOURCES[spec["kind"]](spec, start, end)
-        pending.append((root / spec["path"], df, extras | window | stamp, f"{name}.parquet"))
+        reports[root / name / "reports" / "universe"] = b.reports
+    return _write(pending, reports)
 
+
+def _window(cfg: dict) -> tuple[str, date, date]:
+    bar, start, end = cfg["data"]["bar"], cfg["data"]["start"], cfg["data"]["end"]
+    if bar != "1d":
+        raise NotImplementedError(f"bar {bar!r}: only 1d so far (see CONTRACTS.md open questions)")
+    return bar, start, end
+
+
+def _write(pending: Pending, reports: dict[Path, dict[str, pl.DataFrame]]) -> list[Path]:
     dests = []
     for dest, df, manifest, file in pending:
         store.write(df, dest, manifest, file=file)

@@ -6,7 +6,7 @@ from typing import NamedTuple
 import polars as pl
 
 from gnns.config import ROOT
-from gnns.data import features, membership, store
+from gnns.data import features, restrict, store, universe
 from gnns.data.snapshot import GraphSnapshot
 from gnns.graphs.base import GraphBuilder
 from gnns.graphs.macro import MacroGraphBuilder
@@ -37,17 +37,24 @@ def build_snapshots(cfg: dict) -> Snapshots:
         raise ValueError(f"unknown builder {graph['builder']!r}; valid: {sorted(BUILDERS)}")
     cls = BUILDERS[graph["builder"]]
     cls.check_config(cfg)  # before any I/O
+    filters = graph.get("universe_filters") or []
+    restrict.check(filters)
 
     root = ROOT / cfg["data_root"]
     lf, price_manifest = store.open(root / graph["universe"] / cfg["data"]["bar"])
     prices = lf.collect()
     feats = features.compute(prices, graph["features"])
     axis = prices["timestamp"].unique().sort()
-    if membership.exists(root, graph["universe"]):
-        # Membership universe: a node must also be a member at t (history still counts
-        # every bar, including those from before it joined).
-        members = membership.mask(root, graph["universe"], axis)
+    if universe.exists(root, graph["universe"]):
+        # Membership universe: a node must also be in the (filtered) universe table at t
+        # (history still counts every bar, including those from before it joined).
+        members = universe.mask(root, graph["universe"], filters)
         feats = feats.join(members, on=["timestamp", "ticker"], how="semi")
+    elif filters:
+        raise ValueError(
+            f"graph universe_filters need a membership universe; {graph['universe']!r} has no "
+            "universe table (run gnns build-universe, or remove universe_filters)"
+        )
     sources = cls.load_sources(root, graph.get("sources", {}))
     if clash := sorted(sources.keys() & {"prices", "features"}):
         raise ValueError(f"{graph['builder']}: source names {clash} are reserved")
