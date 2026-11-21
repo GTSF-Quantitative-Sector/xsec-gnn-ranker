@@ -1,10 +1,12 @@
 data:
-  universes:              # each → config/universes/<name>.txt
+  universes:              # each → config/universes/<name>.yaml
+    - sp500                 # the central equity universe (needs gnns fetch-wrds first)
     - sector_etfs
     - benchmarks
   bar: 1d                 # shared by every universe above
   start: 2010-01-01
-  end: 2026-06-30         # inclusive
+  end: 2025-12-31         # inclusive; at most CRSP's last date (sp500 prices use CRSP's
+                          # factors; extending past it is an open issue)
 
 graph: sector_etf_corr      # → config/graphs/sector_etf_corr.yaml
 horizon_bars: 5             # label: enter at next bar's open, exit h bars later; also one

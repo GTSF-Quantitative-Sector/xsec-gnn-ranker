@@ -111,7 +111,7 @@ def reference_returns(run_cfg: dict, settings: dict, data_root: str) -> tuple[pl
         if ticker not in tickers:
             raise BenchmarksMissing(
                 f"backtest.{role} {ticker} is not in the benchmarks dataset; add it to "
-                "config/universes/benchmarks.txt and run gnns build-data"
+                "config/universes/benchmarks.yaml and run gnns build-data"
             )
         rows = fwd.filter(pl.col("ticker") == ticker)
         cols.append(rows.select("timestamp", pl.col("fwd_return").alias(role)))

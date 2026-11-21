@@ -167,3 +167,58 @@ def test_no_target_node_on_any_date_raises(tmp_path, monkeypatch):
     cfg = _toy_cfg(tmp_path, monkeypatch, empty_days=[6, 11, 16, 21, 26])
     with pytest.raises(ValueError, match="toy: no snapshot has a target node"):
         build_snapshots(cfg)
+
+
+def _universe_table(tmp_path) -> None:
+    """Every ETF trades all 30 days. XLK joins at day 16; XLE leaves at day 21; XLF is always
+    a member. mktcap ranks XLF, XLK, XLE."""
+    caps = {"XLE": 1.0, "XLF": 3.0, "XLK": 2.0}
+    member = {"XLE": range(20), "XLF": range(30), "XLK": range(15, 30)}
+    rows = [
+        (T0 + timedelta(days=i), k, T0.date(), i in member[k], k, 1.0, caps[k])
+        for k in member
+        for i in range(30)
+    ]
+    table = pl.DataFrame(
+        rows,
+        schema={
+            "timestamp": pl.Datetime("us", "America/New_York"),
+            "security_id": pl.String,
+            "list_date": pl.Date,
+            "member": pl.Boolean,
+            "company": pl.String,
+            "adv_63": pl.Float64,
+            "mktcap": pl.Float64,
+        },
+        orient="row",
+    )
+    store.write(table, tmp_path / "etfs" / "universe", MANIFEST, file="universe.parquet")
+
+
+def test_a_membership_universe_only_has_members_as_nodes(tmp_path):
+    cfg = _cfg(tmp_path)
+    _universe_table(tmp_path)
+    snaps, _, _ = build_snapshots(cfg)
+    nodes = {s.timestamp.day: sorted(s.node_ids.tolist()) for s in snaps}
+    assert nodes == {
+        6: ["XLE", "XLF"],
+        11: ["XLE", "XLF"],
+        16: ["XLE", "XLF", "XLK"],  # XLK's history before it joined counts
+        21: ["XLF", "XLK"],
+        26: ["XLF", "XLK"],
+    }
+
+
+def test_universe_filters_narrow_the_nodes(tmp_path):
+    cfg = _cfg(tmp_path)
+    _universe_table(tmp_path)
+    cfg["graph"]["universe_filters"] = [{"top_n": {"by": "mktcap", "n": 2}}]
+    nodes = {s.timestamp.day: sorted(s.node_ids.tolist()) for s in build_snapshots(cfg).snapshots}
+    assert nodes[11] == ["XLE", "XLF"] and nodes[16] == ["XLF", "XLK"]
+
+
+def test_universe_filters_need_a_membership_universe(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg["graph"]["universe_filters"] = [{"top_n": {"by": "mktcap", "n": 2}}]
+    with pytest.raises(ValueError, match="need a membership universe"):
+        build_snapshots(cfg)

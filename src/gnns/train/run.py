@@ -23,7 +23,7 @@ from torch import nn
 from torch_geometric.data import Data
 
 from gnns.config import ROOT, git_sha, mlflow_tracking_uri
-from gnns.data.labels import forward_returns
+from gnns.data.labels import forward_returns, load_delistings
 from gnns.eval import metrics
 from gnns.eval.importance import permutation_importance
 from gnns.graphs.build import build_snapshots
@@ -82,7 +82,8 @@ def build(cfg: dict) -> Built:
     """Snapshots, labels, search folds and per-fold datasets for the configured graph."""
     h = cfg["horizon_bars"]
     snaps, manifests, prices = build_snapshots(cfg)  # manifests as read at open time
-    labels = forward_returns(prices, h)
+    delistings = load_delistings(ROOT / cfg["data_root"], cfg["graph"]["universe"])
+    labels = forward_returns(prices, h, delistings)
     axis = prices["timestamp"].unique().sort()
     folds = [
         f

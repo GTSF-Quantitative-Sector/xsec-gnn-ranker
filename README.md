@@ -47,6 +47,41 @@ Any top-level key in `machine.yaml` (e.g. `graph:`, `normalize:`) overrides the 
 value in `config/config.yaml`. The override replaces the key whole: nested blocks such as
 `train:` are not merged, so copy the full block to change one of its values.
 
+### WRDS access
+
+The S&P 500 universe (issue #1) uses Wharton Research Data Services (WRDS), read over its
+PostgreSQL interface with `psycopg2` (in `environment.yml`; after pulling, run
+`conda env update -f environment.yml --prune`).
+
+1. Add your WRDS login to `.env`:
+
+       WRDS_USERNAME=your_wrds_username
+       WRDS_PASSWORD=your_wrds_password
+
+   If `WRDS_PASSWORD` is not set, the password is read from a standard pgpass file instead
+   (`%APPDATA%\postgresql\pgpass.conf` on Windows, `~/.pgpass` elsewhere).
+
+2. Check the connection and what the subscription can read (approve the Duo push on your
+   phone if one arrives; the connection waits for it):
+
+       python scripts/wrds_probe.py                                # all sections
+       python scripts/wrds_probe.py --sections datastream indexes  # skip the slow general one
+
+   The probe prints metadata and aggregates only, and saves them to
+   `<data_root>/wrds_probe/` (delete the folder when done).
+
+3. Fetch the extracts the `sp500` universe is built from (one connection, about 30 s;
+   approve the Duo push):
+
+       gnns fetch-wrds
+
+   This writes `<data_root>/wrds/<extract>/` (Datastream's S&P 500 lists, ticker, CUSIP and
+   name history; CRSP's security history of every share class of those companies,
+   distributions, delistings, and daily prices, returns and market caps, from `data.start`
+   on). Run it again to refresh: Datastream updates monthly, CRSP annually.
+   `gnns build-universe` and `gnns build-data` only read these files and never connect to
+   WRDS.
+
 ### CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check`, `ruff format --check`,
@@ -130,20 +165,28 @@ stage does, edit config, not code.
 
 ### Build price datasets
 
-1. Choose universes, or add one as `config/universes/<name>.txt` (one ticker per line).
+1. Choose universes, or add one as `config/universes/<name>.yaml`:
+
+       kind: list
+       tickers: [XLB, XLC, XLE]
+
    Keep benchmark tickers in the `benchmarks` universe, never in a construction's list: every
-   ticker in a universe becomes a ranked graph node.
+   ticker in a universe becomes a ranked graph node. `sp500`
+   ([config/universes/sp500.yaml](config/universes/sp500.yaml)) is the central equity universe:
+   S&P 500 members point in time (see "The sp500 universe" below). It needs
+   `gnns fetch-wrds` (WRDS access, above) and `gnns build-universe` first.
 2. Set the `data` block in `config/config.yaml`:
 
        data:
          universes:
+           - sp500
            - sector_etfs
            - benchmarks
          bar: 1d            # shared by every universe; only 1d is supported so far
          start: 2010-01-01
-         end: 2026-06-30    # inclusive
+         end: 2025-12-31    # inclusive; at most CRSP's last date while sp500 is built
 
-3. Run `gnns build-data`.
+3. Run `gnns build-data` (for `sp500`, after `gnns build-universe`).
 
 This writes `<data_root>/<universe>/<bar>/prices.parquet` and `manifest.json` for each
 universe (schema in [docs/CONTRACTS.md](docs/CONTRACTS.md)). Prices are adjusted for splits
@@ -158,6 +201,64 @@ are not built. For `macro_sensitivity`, that is `<data_root>/macro/` (Massive se
 in its graph file; see [docs/graphs/macro_sensitivity.md](docs/graphs/macro_sensitivity.md)).
 They are validated together with the universes, so a failure in either writes nothing.
 
+#### The sp500 universe
+
+Three commands, each run once and stored (rerun only to change the data):
+
+    gnns fetch-wrds       # WRDS extracts -> <data_root>/wrds/ (about 30 s, one Duo approval)
+    gnns build-universe   # universe table, raw bars, delistings (about 1 min, Massive)
+    gnns build-data       # adjusted prices, plus the other universes (seconds for sp500)
+
+`gnns build-universe` builds the **universe table**, `<data_root>/sp500/universe/`: one row
+per security per session it trades, for every security on Datastream's month-end S&P 500
+lists in the date range (every share class). `member` marks the sessions it is in the
+index; the other rows are there for feature lookbacks and labels. Each row carries the
+security's identifiers on that date (`security_id` = Datastream infocode; Massive,
+Datastream and CRSP tickers; CUSIP, ISIN, company, PERMNO, PERMCO), the list in force
+(`list_date`), `dollar_volume` (Massive VWAP × volume), its trailing means `adv_20` and
+`adv_63` (windows in [config/universes/sp500.yaml](config/universes/sp500.yaml)), and
+`mktcap` (CRSP, summed over the company's share classes). Read it with
+`gnns.data.universe.load(root, "sp500")`. It also writes:
+
+- `<data_root>/sp500/raw_bars/`: Massive's unadjusted daily OHLCV and VWAP of every
+  security, fetched by the ticker it had on each date, ending at a delisted security's last
+  CRSP trading day;
+- `<data_root>/sp500/delistings/`: CRSP's delisting return of each security that stops;
+- `<data_root>/sp500/reports/universe/*.csv`: review reports (symbol and bar gaps, bars cut
+  after a delisting, sessions without a PERMNO or a market cap, ...).
+
+Review reports are for a person (the CRSP-based ones especially; see "WRDS access"); they
+live under `data/`, which git ignores, and each build replaces its own.
+
+`gnns build-data` then adjusts the raw bars with CRSP's factor on every CRSP distribution
+date (dividends, splits, spinoffs alike) into `<data_root>/sp500/1d/`, and writes
+`<data_root>/sp500/reports/prices/*.csv` (including how often daily returns match CRSP's).
+The data ends at CRSP's last date (2025-12-31 now): both commands refuse a later `data.end`.
+
+A construction's nodes are the members; its graph file narrows them with
+`universe_filters`, applied in order (`gnns.data.restrict`):
+
+    universe: sp500
+    universe_filters:
+      - one_class_per_company: {by: adv_63}   # most liquid class, decided at each list
+      - top_n: {by: mktcap, n: 100}           # any column: adv_20, adv_63, mktcap, ...
+
+Rules: [docs/CONTRACTS.md](docs/CONTRACTS.md), "Membership universes" and "Identifiers".
+`gnns build-universe` fails, listing the securities, if the identifiers break an invariant
+(a ticker shared by two securities on a date) or a member has more than 5 sessions in a row
+without a Massive symbol. Fix those, and anything a report shows, in the reviewed, tracked
+[config/universes/overrides.csv](config/universes/overrides.csv): `security_id, id_type,
+value, valid_from, valid_to, note` replaces derived identifiers on the dates it covers (an
+empty `value` removes them); e.g. a `ticker_massive` row for a ticker Datastream's history
+misses, whose bars the build then fetches. Then rerun `gnns build-universe` and
+`gnns build-data`. To check a candidate fix, print what Datastream and Massive say about
+the security (no CRSP values):
+
+    python scripts/override_evidence.py 39979 --symbols JAVA --start 2010-01-01 --end 2010-02-15
+
+In Claude Code, ask for the `universe-overrides` skill: it researches each reported problem
+with that script and proposes override rows, with evidence, for you to review.
+
 Every dataset, including a construction's extra sources, is a folder with its data file and
 one `manifest.json` (source, file, rows, sha256, build time, git SHA). **Datasets built
 before the manifest gained `source` and `file` must be rebuilt once:** run `gnns build-data`
@@ -169,8 +270,9 @@ polars `LazyFrame` of prices; `gnns.data.store.open(folder)` returns any dataset
 
 ### Build graph snapshots
 
-Needs the construction's universe built first (`gnns build-data`), plus any extra datasets
-its doc lists (built by the same command while the construction is selected).
+Needs the construction's universe built first (`gnns build-data`, after `gnns
+build-universe` for `sp500`), plus any extra datasets its doc lists (built by the same
+command while the construction is selected).
 
 Available constructions:
 
@@ -304,7 +406,7 @@ stay. There is no resume: rerunning starts over.
 ### Backtest
 
 Needs the `benchmarks` universe built with the `backtest.benchmark` and
-`backtest.risk_free` tickers (SPY and BIL in `config/universes/benchmarks.txt`).
+`backtest.risk_free` tickers (SPY and BIL in `config/universes/benchmarks.yaml`).
 
 1. Set the `backtest` block in `config/config.yaml`:
 

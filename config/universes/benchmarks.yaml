@@ -1,0 +1,6 @@
+# Reference series for evaluation and the backtest; never nodes of a construction.
+kind: list
+tickers:
+  - SPY           # S&P 500 (backtest.benchmark)
+  - RSP           # S&P 500 equal weight
+  - BIL           # 1-3 month T-bills (backtest.risk_free)

@@ -42,3 +42,38 @@ def test_label_ignores_bar_t_itself():
     assert a.filter(pl.col("timestamp") == T0)["fwd_return"].item() == pytest.approx(
         b.filter(pl.col("timestamp") == T0)["fwd_return"].item()
     )
+
+
+def _delist(ticker: str, day: int, delret: float) -> pl.DataFrame:
+    return pl.DataFrame(
+        {"ticker": [ticker], "last_bar": [T0 + timedelta(days=day)], "delret": [delret]}
+    )
+
+
+def test_a_delisting_inside_the_window_labels_from_the_final_value():
+    # #3's repro: X trades days 0-3 of a 10-day axis; horizon 5 -> day 0 exits on day 6.
+    prices = _prices({"A": [10.0 + i for i in range(10)], "X": [4.0, 4.0, 4.0, 5.0]})
+    plain = forward_returns(prices, 5)
+    assert plain.filter(pl.col("ticker") == "X").is_empty()
+    out = forward_returns(prices, 5, _delist("X", 3, -0.5)).filter(pl.col("ticker") == "X")
+    bars = (pl.col("timestamp") - T0).dt.total_days()
+    # Final value = close[3] * (1 + delret) = 10 * 0.5 = 5. Days 0-2 enter at open[t+1] = 4
+    # (day 2 enters at day 3's open, 5); day 3 is the last bar, so its label is delret.
+    assert out.select(bars)["timestamp"].to_list() == [0, 1, 2, 3]
+    assert out["fwd_return"].to_list() == pytest.approx([5 / 4 - 1, 5 / 4 - 1, 5 / 5 - 1, -0.5])
+    assert out["label_end"].to_list() == [T0 + timedelta(days=d) for d in (6, 7, 8, 9)]
+
+
+def test_delisting_labels_respect_the_trailing_cutoff_and_leave_others_alone():
+    prices = _prices({"A": [10.0 + i for i in range(10)], "X": [4.0] * 8})
+    out = forward_returns(prices, 5, _delist("X", 7, 0.0))
+    # Positions with i + 1 + 5 > 9 (days 4..9) have no label, delisted or not.
+    assert out["timestamp"].max() == T0 + timedelta(days=3)
+    a_plain = forward_returns(prices, 5).filter(pl.col("ticker") == "A")
+    assert out.filter(pl.col("ticker") == "A").equals(a_plain)
+
+
+def test_a_missing_bar_without_a_delisting_stays_missing():
+    prices = _prices({"A": [10.0 + i for i in range(10)], "X": [4.0, 4.0, 4.0, 5.0]})
+    out = forward_returns(prices, 5, _delist("A", 9, 0.0))
+    assert out.filter(pl.col("ticker") == "X").is_empty()

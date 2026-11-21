@@ -30,6 +30,10 @@
       "Bash(pyright:*)",
       "Bash(ruff check:*)",
       "Bash(pytest:*)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Bash(*.env*)"
     ]
   }
 }

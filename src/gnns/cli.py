@@ -4,13 +4,20 @@ import argparse
 import logging
 
 from gnns.config import load_config
-from gnns.data.build import build
+from gnns.data.build import build, build_universe
 from gnns.graphs.build import build_snapshots
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="gnns")
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser(
+        "fetch-wrds", help="fetch the WRDS extracts the sp500 universe is built from (Duo)"
+    )
+    sub.add_parser(
+        "build-universe",
+        help="build the sp500 universe table, raw bars and delistings (Massive bars)",
+    )
     sub.add_parser("build-data", help="fetch, adjust, validate and write the configured datasets")
     sub.add_parser("build-graphs", help="build the configured graph's snapshots and summarize them")
     sub.add_parser("train", help="train model + baseline on search folds; log metrics to MLflow")
@@ -25,7 +32,15 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     cfg = load_config()
-    if args.command == "build-data":
+    if args.command == "fetch-wrds":
+        from gnns.data import wrds
+
+        for dest in wrds.fetch(cfg):
+            print(f"wrote {dest}")
+    elif args.command == "build-universe":
+        for dest in build_universe(cfg):
+            print(f"wrote {dest}")
+    elif args.command == "build-data":
         for dest in build(cfg):
             print(f"wrote {dest}")
     elif args.command == "build-graphs":

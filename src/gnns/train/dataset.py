@@ -65,9 +65,13 @@ def to_data(
         edge_attr=torch.from_numpy(np.ascontiguousarray(edge_attr)),
         y=torch.from_numpy(np.nan_to_num(y)),
         label_mask=torch.from_numpy(label_mask),
+        target_mask=torch.from_numpy(s.target_mask),
         node_type=torch.from_numpy(s.node_type),
         node_ids=s.node_ids.tolist(),
         timestamp=s.timestamp,
+        # Whether t's label window is complete (any node has a label): only then are
+        # unlabeled target nodes kept in predictions, with a null fwd_return (#3).
+        labeled=labels_t is not None,
     )
 
 

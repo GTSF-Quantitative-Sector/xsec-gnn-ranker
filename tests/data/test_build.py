@@ -16,7 +16,7 @@ def setup(tmp_path, monkeypatch, fake_massive):  # noqa: F811
     data, calls = fake_massive
     data["U1"] = data["R"]  # the shared universe's one ticker
     (tmp_path / "config" / "universes").mkdir(parents=True)
-    (tmp_path / "config" / "universes" / "u.txt").write_text("U1\n")
+    (tmp_path / "config" / "universes" / "u.yaml").write_text("kind: list\ntickers: [U1]\n")
     monkeypatch.setattr(build, "CONFIG_DIR", tmp_path / "config")
     monkeypatch.setattr(build, "ROOT", tmp_path)
     monkeypatch.setattr(build, "git_sha", lambda: "test")
@@ -87,4 +87,79 @@ def test_failed_universe_writes_no_source(setup, monkeypatch):
     )
     with pytest.raises(ValueError, match="validation failed"):
         build.build(_with_macro(cfg))
+    assert not root.exists()
+
+
+def _membership_universe(tmp_path, monkeypatch, fail: bool = False):
+    """A membership universe whose universe build (Massive + WRDS) and adjustment are
+    stubbed."""
+    from gnns.data import adjustment, universe
+
+    (tmp_path / "config" / "universes" / "m.yaml").write_text(
+        "kind: membership\nsource: datastream\nlist_code: 4408\n"
+    )
+    real = massive.daily_bars("U1", START, END)
+    reports = {"needs_a_look": pl.DataFrame({"x": [1]}), "empty": pl.DataFrame({"x": []})}
+
+    def fake_universe(name, spec, start, end, root, config_dir):
+        if fail:
+            raise ValueError("member sessions without a Massive symbol")
+        return universe.Built(
+            universe=pl.DataFrame({"timestamp": real["timestamp"], "security_id": "7"}),
+            raw_bars=real.with_columns(security_id=pl.lit("7")),
+            delistings=pl.DataFrame({"ticker": ["7"], "delret": [0.0]}),
+            manifests={k: {"source": "test"} for k in ("universe", "raw_bars", "delistings")},
+            reports=reports,
+        )
+
+    def fake_adjustment(name, start, end, root):
+        if fail:
+            raise ValueError("run gnns build-universe first")
+        prices = real.with_columns(ticker=pl.lit("7"))
+        return adjustment.Built(prices, {"source": "test", "tickers": ["7"]}, reports)
+
+    monkeypatch.setattr(universe, "build", fake_universe)
+    monkeypatch.setattr(adjustment, "build", fake_adjustment)
+
+
+def test_build_universe_writes_its_datasets_and_reports(setup, tmp_path, monkeypatch):
+    cfg, root, _ = setup
+    _membership_universe(tmp_path, monkeypatch)
+    cfg["data"]["universes"] = ["m", "u"]
+    dests = build.build_universe(cfg)
+    assert dests == [
+        root / "m" / "universe",
+        root / "m" / "raw_bars",
+        root / "m" / "delistings",
+    ]
+    for d in dests:
+        assert json.loads((d / "manifest.json").read_text())["git_sha"] == "test"
+    reports = root / "m" / "reports" / "universe"
+    assert sorted(p.name for p in reports.iterdir()) == ["needs_a_look.csv"]
+    assert not (root / "u").exists()  # list universes have no universe build
+
+
+def test_build_universe_needs_a_membership_universe(setup):
+    cfg, _, _ = setup
+    with pytest.raises(ValueError, match="no membership universe"):
+        build.build_universe(cfg)
+
+
+def test_build_data_adjusts_a_membership_universe(setup, tmp_path, monkeypatch):
+    cfg, root, _ = setup
+    _membership_universe(tmp_path, monkeypatch)
+    cfg["data"]["universes"] = ["m", "u"]
+    assert build.build(cfg) == [root / "m" / "1d", root / "u" / "1d"]
+    manifest = json.loads((root / "m" / "1d" / "manifest.json").read_text())
+    assert manifest["universe"] == "m" and manifest["tickers"] == ["7"]
+    assert (root / "m" / "reports" / "prices" / "needs_a_look.csv").exists()
+
+
+@pytest.mark.parametrize("command", ["build", "build_universe"])
+def test_a_failed_membership_universe_writes_nothing(setup, tmp_path, monkeypatch, command):
+    cfg, root, _ = setup
+    _membership_universe(tmp_path, monkeypatch, fail=True)
+    cfg["data"]["universes"] = ["u", "m"]
+    with pytest.raises(ValueError):
+        getattr(build, command)(cfg)
     assert not root.exists()

@@ -14,7 +14,7 @@ relational signal.
 
 ## Nodes, edges, features
 
-- **Nodes:** the 11 GICS sector ETFs (`config/universes/sector_etfs.txt`), one node type
+- **Nodes:** the 11 GICS sector ETFs (`config/universes/sector_etfs.yaml`), one node type
   `equity`. Every node is a target. A node enters once it has `features.min_history_bars`
   of history, so XLRE and XLC join later than the rest.
 - **Edges:** fully connected. One undirected edge per pair, stored in both directions,

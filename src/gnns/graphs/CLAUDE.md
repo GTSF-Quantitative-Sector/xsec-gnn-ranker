@@ -33,8 +33,9 @@ correlation builder that exercises the pipeline end to end.
   as cash.
 - Which timestamps are built is the run's choice, not the builder's: one snapshot every
   `horizon_bars` in `config/config.yaml`, shared by every construction.
-- Each construction has `config/graphs/<name>.yaml` (builder, universe, `params`, its own
-  node `features`, `sources`) and `docs/graphs/<name>.md` (template:
+- Each construction has `config/graphs/<name>.yaml` (builder, universe, optional
+  `universe_filters` narrowing a membership universe via `gnns.data.restrict`, `params`,
+  its own node `features`, `sources`) and `docs/graphs/<name>.md` (template:
   `docs/graphs/sector_etf_corr.md`), plus a row in the README's constructions table. Constructions share no features; config holds values,
   builder code declares structure (inputs, lookbacks). Shared across constructions:
   labels and snapshot spacing (`horizon_bars`), walk-forward and held-out settings.

@@ -34,7 +34,7 @@ We will then divide the top 3 (based on team member interest/vote) GNN construct
 
 ## Infrastructure:
 
-1. Universe — the point-in-time tradeable universe plus a cross-source entity-resolution table (ticker/CUSIP/NAICS/GICS mapping). Build this first; everything else depends on it. For the dummy phase, this can just be the 11 GICS sector ETFs with trivial date coverage.
+1. ✓ Universe — the point-in-time tradeable universe plus a cross-source entity-resolution table (ticker/CUSIP/NAICS/GICS mapping). Build this first; everything else depends on it. For the dummy phase, this can just be the 11 GICS sector ETFs with trivial date coverage.
 2. ✓ GraphSnapshot — the single most important interface decision in the whole system: a standardized data object holding a node feature matrix, edge index, edge weight array, node ID list, and a date. Every graph builder must output this exact shape, and every downstream layer must consume nothing else. Lock this schema before anyone writes real graph-building code — changing it later means re-touching every builder.
 3. ✓ GraphBuilder (abstract base + dummy implementation) — a base class with one required method, build(date, universe) -> GraphSnapshot. Write a trivial SectorETFCorrelationBuilder subclass first (simple rolling correlation across the 11 sector ETFs) purely to exercise the pipeline end to end without needing BEA tables, segment data, or macro feeds to be ready.
 4. ✓ FeatureEngine — shared node-feature computation (momentum, volatility, fundamentals, regime state), decoupled from any specific graph idea. Build and test against the dummy universe.
