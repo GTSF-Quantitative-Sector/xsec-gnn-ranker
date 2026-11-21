@@ -137,16 +137,17 @@ def test_layout_mask_baseline_information_and_model_backward(fixture):
         assert m(batch)[:8].detach().numpy() == pytest.approx(m(data[0]).detach().numpy(), abs=1e-6)
 
 
+@pytest.mark.parametrize("scale", ["raw", "percent"])
 @pytest.mark.parametrize("mode", ["magnitude", "signed", "constant", "shuffled"])
-def test_future_deletion_invariance(fixture, mode):
-    b = builder(fixture, edge_mode=mode)
+def test_future_deletion_invariance(fixture, mode, scale):
+    b = builder(fixture, edge_mode=mode, beta_scale=scale)
     t = fixture[2][40]
     full = b.build(t)
     trimmed = {name: df.filter(pl.col("timestamp") <= t) for name, df in b._inputs.items()}
     short = MacroGraphBuilder(
         trimmed,
         b._axis.filter(b._axis <= t),
-        **(fixture[0]["graph"]["params"] | {"edge_mode": mode}),
+        **(fixture[0]["graph"]["params"] | {"edge_mode": mode, "beta_scale": scale}),
     ).build(t)
     assert np.array_equal(full.x, short.x)
     assert np.array_equal(full.edge_attr, short.edge_attr)
@@ -192,10 +193,37 @@ def test_macro_carried_forward_however_old_until_a_factor_has_no_spread(fixture)
     assert not without_credit(ts[29:41]).target_mask.any()
 
 
-def test_constant_edges_remove_beta_from_both_channels_and_signed_preserves_sign(fixture):
+@pytest.mark.parametrize("scale", ["raw", "percent"])
+def test_constant_edges_are_the_snapshots_mean_edge_in_both_channels(fixture, scale):
     t = fixture[2][40]
-    s = builder(fixture, edge_mode="constant").build(t)
-    assert (s.edge_weight == 1).all() and (s.edge_attr == 1).all()
+    real = builder(fixture, beta_scale=scale).build(t)
+    s = builder(fixture, edge_mode="constant", beta_scale=scale).build(t)
+    assert s.edge_weight == pytest.approx(np.full(15, real.edge_weight.mean()), rel=1e-6)
+    assert np.array_equal(s.edge_attr[:, 0], s.edge_weight)
+    assert len(set(s.edge_weight.tolist())) == 1  # no per-edge beta information
+    assert np.array_equal(s.x, real.x)  # node exposures unchanged
+
+
+def test_percent_scales_edges_and_interactions_only(fixture):
+    t = fixture[2][40]
+    for mode in ("magnitude", "signed", "shuffled", "constant"):
+        raw = builder(fixture, edge_mode=mode).build(t)
+        pct = builder(fixture, edge_mode=mode, beta_scale="percent").build(t)
+        assert pct.edge_weight == pytest.approx(100 * raw.edge_weight, rel=1e-6)
+        assert pct.edge_attr == pytest.approx(100 * raw.edge_attr, rel=1e-6)
+        names = raw.feature_names.tolist()
+        inter = [names.index(f"interaction_{f}") for f in FACTORS]
+        assert pct.x[:, inter] == pytest.approx(100 * raw.x[:, inter], rel=1e-6)
+        assert np.abs(raw.x[:3, inter]).max() > 0
+        # Every other column, including the ranked beta_* / magnitude_*, is unchanged.
+        rest = [i for i in range(len(names)) if i not in inter]
+        assert np.array_equal(pct.x[:, rest], raw.x[:, rest])
+    with pytest.raises(ValueError, match="beta_scale"):
+        builder(fixture, beta_scale="bps")
+
+
+def test_signed_edges_preserve_sign(fixture):
+    t = fixture[2][40]
     s = builder(fixture, edge_mode="signed").build(t)
     idx = [s.feature_names.tolist().index(f"beta_{f}") for f in FACTORS]
     assert np.array_equal(s.edge_attr[:, 0], s.x[:3, idx].reshape(-1))

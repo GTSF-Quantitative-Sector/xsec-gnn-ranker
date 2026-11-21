@@ -26,8 +26,12 @@ beyond the supplied macro inputs, not beta signal versus a price-only model.
   Nonnegative `edge_weight` carries absolute beta; the edge attribute `beta` carries the
   configured signed or magnitude value. GATv2 uses those as attention attributes, not
   fixed multiplicative message weights. `edge_mode: constant` replaces both channels with
-  ones; `shuffled` permutes whole equity exposure vectors with a deterministic date-local
-  seed. Node exposure features stay unchanged in these topology controls. Factor-specific
+  that snapshot's mean |edge| under the active `beta_scale` (one value per date, from that
+  date's real edges, so the control has the real edges' scale and no per-edge
+  information); `shuffled` permutes whole equity exposure vectors with a deterministic
+  date-local seed. Node exposure features stay unchanged in these topology controls.
+  Before #22 `constant` set every edge to 1.0, about 470x the mean raw edge; runs made
+  with that are labeled "constant (1.0, old)". Factor-specific
   edge types are metadata: the generic GATv2 does not dispatch relation-specific
   parameters, and it retains the shared model's self-loops. This differs from the pilot's
   factor-specific encoders and bipartite residual architecture, and is a new experiment
@@ -56,6 +60,14 @@ beyond the supplied macro inputs, not beta signal versus a price-only model.
   builder marks the columns it scaled itself `feature_prescaled` (macro level, change,
   interaction, context and factor identity), so the shared `normalize` leaves them as is
   and still ranks equity features, betas and magnitudes across equities.
+- **Beta units (`beta_scale`):** a beta is a return per one-SD factor move, about
+  0.001-0.01 (median |beta| 0.0006-0.0038 by factor on the real snapshots), so where it
+  reaches the model unranked it is ~100-1000x smaller than every other input, which sits
+  in about [-1, 1]. `raw` (the default) keeps those units; `percent` multiplies beta by
+  100 in `edge_weight`, the edge attribute `beta` and `interaction_*` (medians 0.06-0.38,
+  99th percentiles up to 1.6). The information is identical: ranked `beta_*` /
+  `magnitude_*` node columns ignore a positive constant and are unchanged, so any change in
+  results is due to scale alone.
 
 ## Data decisions
 
@@ -140,6 +152,7 @@ params in `model_grid`; the Sweep column says which are tuning choices.
 | `ridge` | ridge penalty | tunable |
 | `lag_bars` | additional bar lag after bar-end availability | keep out: robustness check, and it moves the folds |
 | `edge_mode` | `magnitude`, `signed`, `constant` or `shuffled` | `magnitude` vs `signed` only; `constant` and `shuffled` are placebo controls, run on purpose |
+| `beta_scale` | `raw` or `percent` (x100): units of beta in edges and `interaction_*` ("Beta units") | keep out: a design arm, run on purpose |
 | `seed` | seed for `shuffled` | keep out: not a setting |
 | `invert_factors` | factors whose change is minus their return (`[rates]`) | keep out: part of the factor definition |
 | `level_factors` | factors that get `macro_level_*` and a nonzero `context_level` (`[oil, gold]`) | keep out: part of the factor definition |

@@ -24,6 +24,8 @@ params:
                           # check, not a tuning choice: keep out of grids
   edge_mode: magnitude    # magnitude | signed | constant | shuffled; constant and shuffled
                           # are placebo controls, never picked by a grid
+  beta_scale: raw         # raw | percent: units of beta in edges and interaction_*; a
+                          # design arm run on purpose, keep out of grids
   seed: 7                 # seed for edge_mode: shuffled; not a setting
   invert_factors: [rates]     # change = minus the series' return; factor definition,
                               # keep out of grids

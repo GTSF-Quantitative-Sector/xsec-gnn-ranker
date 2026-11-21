@@ -19,6 +19,10 @@ PRESCALED = ("macro_level_", "macro_change_", "interaction_", "context_", "facto
 # Fewest complete rows a window needs: more rows than the five regressors. Structural (the
 # fit and the standardization are undefined below it), not a setting.
 MIN_ROWS = len(FACTORS) + 1
+# Units of beta wherever it reaches the model unranked (edge_weight, edge attr `beta`,
+# `interaction_*`): raw return per 1-SD factor move (~0.001-0.01), or percent (x100, on the
+# scale of the other inputs). Ranked node betas and magnitudes are the same in both.
+BETA_SCALES = {"raw": 1.0, "percent": 100.0}
 
 
 def equity_macro_columns(level_factors: tuple[str, ...] = FACTORS) -> list[str]:
@@ -49,6 +53,7 @@ class MacroGraphBuilder(GraphBuilder):
         ridge: float = 10.0,
         lag_bars: int = 0,
         edge_mode: str = "magnitude",
+        beta_scale: str = "raw",
         seed: int = 7,
         invert_factors: list[str] | tuple[str, ...] = ("rates",),
         level_factors: list[str] | tuple[str, ...] = ("oil", "gold"),
@@ -57,10 +62,13 @@ class MacroGraphBuilder(GraphBuilder):
             raise ValueError(f"macro regression window must be >= {MIN_ROWS} bars and ridge > 0")
         if lag_bars < 0 or edge_mode not in {"magnitude", "signed", "constant", "shuffled"}:
             raise ValueError("invalid lag or edge mode")
+        if beta_scale not in BETA_SCALES:
+            raise ValueError(f"beta_scale must be one of {list(BETA_SCALES)}, got {beta_scale!r}")
         if not {*invert_factors, *level_factors} <= set(FACTORS):
             raise ValueError(f"invert_factors and level_factors must be among {list(FACTORS)}")
         self.window_bars, self.ridge, self.lag_bars = window_bars, ridge, lag_bars
         self.edge_mode, self.seed = edge_mode, seed
+        self._scale = BETA_SCALES[beta_scale]
         # Factor order, not config order, so columns are stable.
         self.level_factors = tuple(f for f in FACTORS if f in level_factors)
         self._level = np.array([FACTORS.index(f) for f in self.level_factors], dtype=np.int64)
@@ -155,11 +163,12 @@ class MacroGraphBuilder(GraphBuilder):
         total = count + 5 if count else 0
         x = np.zeros((total, len(node_names)), dtype=np.float32)
         b = np.array(betas, dtype=np.float32).reshape(count, 5)
+        scaled_b = b * np.float32(self._scale)  # beta in `beta_scale` units (unranked uses)
         if scaled is not None and count:
             lev, chg = scaled
             for i, row in enumerate(chosen):
                 x[i, :eq_dim] = np.r_[
-                    [row[name] for name in names], lev, chg, b[i], np.abs(b[i]), b[i] * chg
+                    [row[name] for name in names], lev, chg, b[i], np.abs(b[i]), scaled_b[i] * chg
                 ]
             # Context nodes sorted by factor ID; explicit identity survives shared encoders.
             # Factors without a level get context_level 0; the one-hot tells them apart.
@@ -173,9 +182,11 @@ class MacroGraphBuilder(GraphBuilder):
             [count + sorted(FACTORS).index(f) for _ in chosen for f in FACTORS], dtype=np.int64
         )
         dst = np.repeat(np.arange(count, dtype=np.int64), 5)
-        edge = b.copy() if self.edge_mode == "signed" else np.abs(b)
+        edge = scaled_b if self.edge_mode == "signed" else np.abs(scaled_b)
         if self.edge_mode == "constant":
-            edge = np.ones_like(b)
+            # Matched control: every edge is this snapshot's mean |edge| (same scale as the
+            # real edges, date-local), in both channels; no per-edge beta information.
+            edge = np.full_like(b, np.abs(scaled_b).mean() if count else 0.0)
         elif self.edge_mode == "shuffled":
             # Date-local deterministic permutation; stable under future-data deletion.
             rng = np.random.default_rng([self.seed, t.year, t.month, t.day])
