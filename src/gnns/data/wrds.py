@@ -51,7 +51,8 @@ def connect() -> "psycopg2.extensions.connection":
             user=user,
             password=password,
             sslmode="require",
-            connect_timeout=60,
+            gssencmode="disable",  # WRDS doesn't use Kerberos; skip that attempt
+            connect_timeout=120,  # the login waits for the Duo approval
         )
     except psycopg2.OperationalError as e:
         raise RuntimeError(
